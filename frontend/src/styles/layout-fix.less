@@ -1,0 +1,478 @@
+/* 
+ * Layout Fix for Ant Design Pro Overlap Issues
+ * Fixes: sidebar overlap, content alignment, card positioning
+ */
+
+/* ========== 1. ROOT LAYOUT FIXES ========== */
+
+/* Ensure body and root have proper dimensions */
+body, #root {
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* ========== 2. PRO LAYOUT CONTAINER ========== */
+
+.ant-pro-layout {
+  /* Ensure layout container is relative for positioning */
+  position: relative;
+  min-height: 100vh;
+  
+  /* Clear any conflicting styles */
+  &::before, &::after {
+    content: '';
+    display: table;
+    clear: both;
+  }
+}
+
+/* ========== 3. SIDEBAR FIXES ========== */
+
+/* Sidebar container */
+.ant-pro-sider {
+  /* Fixed positioning and dimensions */
+  position: fixed !important;
+  left: 0 !important;
+  top: 0 !important;
+  bottom: 0 !important;
+  
+  /* Fixed width - DO NOT CHANGE */
+  width: 208px !important;
+  min-width: 208px !important;
+  max-width: 208px !important;
+  flex: 0 0 208px !important;
+  
+  /* Ensure sidebar is above content */
+  z-index: 100 !important;
+  
+  /* Visual separation */
+  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.15) !important;
+  border-right: 1px solid #f0f0f0 !important;
+  background: #001529 !important;
+  
+  /* Prevent content overflow */
+  overflow-y: auto;
+  overflow-x: hidden;
+  
+  /* Collapsed state */
+  &.ant-pro-sider-collapsed {
+    width: 48px !important;
+    min-width: 48px !important;
+    max-width: 48px !important;
+    flex: 0 0 48px !important;
+  }
+  
+  /* Menu inside sidebar */
+  .ant-menu {
+    /* Remove default margins that cause misalignment */
+    margin: 0 !important;
+    padding: 16px 0 !important;
+    
+    /* Ensure menu items don't overflow */
+    .ant-menu-item {
+      margin: 4px 8px !important;
+      width: calc(100% - 16px) !important;
+    }
+  }
+}
+
+/* ========== 4. HEADER FIXES ========== */
+
+.ant-pro-layout-header {
+  /* Fixed header positioning */
+  position: fixed !important;
+  top: 0 !important;
+  right: 0 !important;
+  left: 208px !important; /* Account for sidebar width */
+  z-index: 101 !important; /* Above sidebar */
+  
+  /* Dimensions */
+  height: 64px !important;
+  line-height: 64px !important;
+  
+  /* Visual styling */
+  background: #fff !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1) !important;
+  padding: 0 24px !important;
+  
+  /* Collapsed sidebar adjustment */
+  .ant-pro-sider-collapsed ~ & {
+    left: 48px !important;
+  }
+}
+
+/* ========== 5. MAIN CONTENT FIXES ========== */
+
+/* Main content area */
+.ant-pro-layout-content {
+  /* Critical: Account for sidebar width */
+  margin-left: 208px !important;
+  margin-top: 64px !important; /* Account for header */
+  padding: 24px !important;
+  min-height: calc(100vh - 64px) !important;
+  
+  /* Ensure content doesn't overlap */
+  position: relative;
+  z-index: 1 !important;
+  
+  /* Clear any floats or absolute positioning */
+  &::before {
+    content: '';
+    display: table;
+    clear: both;
+  }
+  
+  /* Collapsed sidebar adjustment */
+  .ant-pro-sider-collapsed ~ & {
+    margin-left: 48px !important;
+  }
+  
+  /* Page container inside content */
+  .ant-pro-page-container {
+    /* Remove any conflicting margins */
+    margin: 0 !important;
+    
+    /* Page header */
+    .ant-page-header {
+      background: #fff !important;
+      border-radius: 8px !important;
+      margin-bottom: 24px !important;
+      padding: 24px !important;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1) !important;
+      
+      /* Ensure header doesn't have negative margins */
+      margin-left: 0 !important;
+      margin-right: 0 !important;
+    }
+    
+    /* Page content */
+    .ant-pro-page-container-children-content {
+      margin: 0 !important;
+      padding: 0 !important;
+    }
+  }
+}
+
+/* ========== 6. DASHBOARD SPECIFIC FIXES ========== */
+
+/* Dashboard statistics cards */
+.dashboard-cards-container,
+.ant-row.ant-row-top {
+  /* Ensure cards container has proper layout */
+  display: flex !important;
+  flex-wrap: wrap !important;
+  margin: 0 -12px !important; /* Negative margin for gutter */
+  
+  /* Clear any absolute positioning */
+  position: relative !important;
+  z-index: 1 !important;
+  
+  /* Individual cards */
+  .ant-col, [class*="ant-col-"] {
+    /* Reset any problematic positioning */
+    position: relative !important;
+    float: none !important;
+    
+    /* Card spacing */
+    padding: 0 12px !important;
+    margin-bottom: 24px !important;
+    
+    /* Ensure cards don't overflow */
+    .ant-card {
+      width: 100% !important;
+      margin: 0 !important;
+      
+      /* Fix for first card misalignment */
+      &:first-child {
+        margin-top: 0 !important;
+      }
+    }
+  }
+  
+  /* Fix for "Total Assets" card misalignment */
+  .ant-col:first-child {
+    /* Ensure first card aligns properly */
+    margin-left: 0 !important;
+    clear: none !important;
+    
+    .ant-card {
+      /* Remove any special styling on first card */
+      border-radius: 8px !important;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1) !important;
+    }
+  }
+}
+
+/* Statistics cards grid */
+.statistics-cards {
+  /* Use flexbox for proper alignment */
+  display: flex !important;
+  flex-wrap: wrap !important;
+  gap: 16px !important;
+  
+  /* Ensure all cards have same height */
+  .ant-card {
+    flex: 1 !important;
+    min-width: 200px !important;
+    min-height: 120px !important;
+    
+    /* Center content */
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: center !important;
+  }
+}
+
+/* ========== 7. CARD ALIGNMENT FIXES ========== */
+
+/* Fix for card misalignment */
+.ant-card {
+  /* Reset any problematic positioning */
+  position: relative !important;
+  top: auto !important;
+  left: auto !important;
+  right: auto !important;
+  bottom: auto !important;
+  
+  /* Consistent styling */
+  border-radius: 8px !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1) !important;
+  border: 1px solid #f0f0f0 !important;
+  background: #fff !important;
+  
+  /* Ensure card doesn't overflow */
+  overflow: hidden;
+  
+  /* Card head */
+  .ant-card-head {
+    border-bottom: 1px solid #f0f0f0 !important;
+    padding: 0 24px !important;
+    min-height: 56px !important;
+    
+    .ant-card-head-title {
+      padding: 16px 0 !important;
+    }
+  }
+  
+  /* Card body */
+  .ant-card-body {
+    padding: 24px !important;
+  }
+}
+
+/* ========== 8. GRID SYSTEM FIXES ========== */
+
+/* Ant Design Grid system fixes */
+.ant-row {
+  /* Clear any problematic margins */
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+  
+  /* Use flexbox properly */
+  display: flex !important;
+  flex-wrap: wrap !important;
+  
+  /* Remove any negative margins that cause overlap */
+  &::before, &::after {
+    display: none !important;
+  }
+  
+  /* Grid columns */
+  .ant-col {
+    /* Reset positioning */
+    position: relative !important;
+    float: none !important;
+    
+    /* Proper padding */
+    padding-left: 12px !important;
+    padding-right: 12px !important;
+    
+    /* Ensure columns don't collapse */
+    flex: 0 0 auto !important;
+  }
+}
+
+/* ========== 9. Z-INDEX MANAGEMENT ========== */
+
+/* Clear z-index hierarchy */
+.ant-pro-sider {
+  z-index: 100 !important; /* Sidebar above content */
+}
+
+.ant-pro-layout-header {
+  z-index: 101 !important; /* Header above sidebar */
+}
+
+.ant-pro-layout-content {
+  z-index: 1 !important; /* Content below header/sidebar */
+}
+
+.ant-card {
+  z-index: 2 !important; /* Cards above content */
+}
+
+/* ========== 10. RESPONSIVE FIXES ========== */
+
+/* Tablet devices (768px - 1024px) */
+@media (max-width: 1024px) {
+  .ant-pro-sider {
+    width: 200px !important;
+    min-width: 200px !important;
+    max-width: 200px !important;
+  }
+  
+  .ant-pro-layout-header {
+    left: 200px !important;
+  }
+  
+  .ant-pro-layout-content {
+    margin-left: 200px !important;
+    padding: 20px !important;
+  }
+  
+  .ant-pro-sider-collapsed ~ .ant-pro-layout-header {
+    left: 48px !important;
+  }
+  
+  .ant-pro-sider-collapsed ~ .ant-pro-layout-content {
+    margin-left: 48px !important;
+  }
+}
+
+/* Mobile devices (< 768px) */
+@media (max-width: 768px) {
+  .ant-pro-sider {
+    /* Transform to drawer on mobile */
+    transform: translateX(-100%) !important;
+    width: 240px !important;
+    
+    &.ant-pro-sider-mobile-open {
+      transform: translateX(0) !important;
+    }
+  }
+  
+  .ant-pro-layout-header {
+    left: 0 !important;
+  }
+  
+  .ant-pro-layout-content {
+    margin-left: 0 !important;
+    margin-top: 64px !important;
+    padding: 16px !important;
+  }
+  
+  /* Dashboard cards stack vertically on mobile */
+  .dashboard-cards-container .ant-col {
+    flex: 0 0 100% !important;
+    max-width: 100% !important;
+  }
+}
+
+/* ========== 11. UTILITY CLASSES ========== */
+
+/* Clear float utility */
+.clearfix::after {
+  content: '';
+  display: table;
+  clear: both;
+}
+
+/* Prevent text overflow */
+.text-ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Flex center utility */
+.flex-center {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+/* ========== 12. DARK MODE ADAPTATION ========== */
+
+[data-theme='dark'] {
+  .ant-pro-sider {
+    background: #1f1f1f !important;
+    border-right-color: #303030 !important;
+    box-shadow: 2px 0 8px rgba(0, 0, 0, 0.3) !important;
+  }
+  
+  .ant-pro-layout-header {
+    background: #1f1f1f !important;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3) !important;
+  }
+  
+  .ant-pro-layout-content {
+    background: #141414 !important;
+  }
+  
+  .ant-card {
+    background: #1f1f1f !important;
+    border-color: #303030 !important;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3) !important;
+  }
+}
+
+/* ========== 13. SPECIFIC OVERRIDES ========== */
+
+/* Override any Ant Design Pro default styles causing issues */
+.ant-pro-components {
+  .ant-pro-table,
+  .ant-pro-form,
+  .ant-pro-card {
+    /* Ensure Pro components don't have conflicting styles */
+    margin: 0 !important;
+    padding: 0 !important;
+    
+    /* Clear any absolute positioning */
+    position: relative !important;
+  }
+}
+
+/* Fix for any inline styles causing issues */
+[style*="position: absolute"],
+[style*="left: 0"],
+[style*="margin-left: 0"] {
+  /* Override problematic inline styles */
+  position: relative !important;
+  left: auto !important;
+  margin-left: auto !important;
+}
+
+/* ========== 14. PERFORMANCE OPTIMIZATIONS ========== */
+
+/* Reduce repaints */
+.will-change-transform {
+  will-change: transform;
+}
+
+/* Hardware acceleration */
+.hardware-accelerated {
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  perspective: 1000px;
+}
+
+/* ========== 15. DEBUGGING HELPERS ========== */
+
+/* Uncomment for debugging layout issues */
+/*
+.debug-border * {
+  border: 1px solid red !important;
+}
+
+.debug-sidebar {
+  background: rgba(255, 0, 0, 0.1) !important;
+}
+
+.debug-content {
+  background: rgba(0, 255, 0, 0.1) !important;
+}
+
+.debug-card {
+  background: rgba(0, 0, 255, 0.1) !important;
+}
+*/

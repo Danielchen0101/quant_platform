@@ -1,0 +1,132 @@
+/* 
+ * 基于真实 DOM 结构的布局修复
+ * 使用用户通过浏览器控制台找到的真实类名
+ */
+
+// ==================== 真实 DOM 结构 ====================
+// 1. 左侧 sidebar: aside.ant-layout-sider.ant-layout-sider-dark
+//    核心类名: .ant-layout-sider
+//
+// 2. 主内容区: main.ant-layout-content
+//    核心类名: .ant-layout-content
+//
+// 3. 外层布局容器: div.ant-layout.ant-layout-has-sider
+//    核心类名: .ant-layout.ant-layout-has-sider
+// =====================================================
+
+// 1. 修复外层布局容器
+.ant-layout.ant-layout-has-sider {
+  // 确保布局容器正确处理 has-sider 状态
+  min-height: 100vh;
+  position: relative;
+  
+  // 当有 sidebar 时，确保布局正确
+  display: flex;
+  flex-direction: row;
+}
+
+// 2. 修复左侧 sidebar
+.ant-layout-sider {
+  // 检查 sidebar 的定位方式
+  position: fixed !important; // 如果是 fixed 定位
+  left: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 100;
+  
+  // 确保 sidebar 有固定宽度
+  width: 208px !important;
+  min-width: 208px !important;
+  max-width: 208px !important;
+  
+  // 视觉优化
+  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.15);
+  overflow-y: auto;
+  
+  // 确保内容区域不溢出
+  .ant-layout-sider-children {
+    height: 100%;
+    overflow-y: auto;
+  }
+}
+
+// 3. 修复主内容区 - 关键修复
+.ant-layout-content {
+  // 关键：为主内容区添加左侧边距，避开 fixed sidebar
+  margin-left: 208px !important; // 与 sidebar 宽度一致
+  
+  // 内容区域样式
+  padding: 24px;
+  min-height: calc(100vh - 64px); // 减去可能的 header 高度
+  background: #f0f2f5;
+  
+  // 确保内容区域宽度正确
+  width: calc(100% - 208px) !important;
+  
+  // 如果 sidebar 是 absolute 而不是 fixed
+  &.with-absolute-sidebar {
+    position: relative;
+    margin-left: 0;
+    padding-left: 208px;
+  }
+}
+
+// 4. 修复可能的内容容器
+main.ant-layout-content {
+  // 确保 main 标签也应用相同样式
+  display: block;
+  flex: 1;
+}
+
+// 5. 修复折叠状态（如果存在）
+.ant-layout-sider-collapsed {
+  width: 80px !important;
+  min-width: 80px !important;
+  max-width: 80px !important;
+  
+  & ~ .ant-layout-content {
+    margin-left: 80px !important;
+    width: calc(100% - 80px) !important;
+  }
+}
+
+// 6. 响应式处理
+@media (max-width: 768px) {
+  .ant-layout-sider {
+    display: none; // 移动端隐藏 sidebar
+  }
+  
+  .ant-layout-content {
+    margin-left: 0 !important;
+    width: 100% !important;
+    padding: 16px;
+  }
+}
+
+// 7. 修复可能被覆盖的样式
+body {
+  overflow-x: hidden;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+// 8. 修复内部卡片容器（如果存在）
+.ant-pro-grid-content,
+.ant-pro-page-container,
+[class*="container"] {
+  margin-left: 0;
+  padding-left: 0;
+}
+
+// 9. 修复网格系统
+.ant-row {
+  margin-left: -12px !important;
+  margin-right: -12px !important;
+}
+
+.ant-col {
+  padding-left: 12px !important;
+  padding-right: 12px !important;
+}

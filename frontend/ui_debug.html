@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>量化平台UI调试工具</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .debug-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #1890ff 0%, #096dd9 100%);
+            color: white;
+            padding: 24px 32px;
+        }
+        
+        .header h1 {
+            font-size: 28px;
+            margin-bottom: 8px;
+        }
+        
+        .header p {
+            opacity: 0.9;
+            font-size: 16px;
+        }
+        
+        .content {
+            padding: 32px;
+        }
+        
+        .section {
+            margin-bottom: 32px;
+            padding: 24px;
+            border: 1px solid #e8e8e8;
+            border-radius: 8px;
+            background: #fafafa;
+        }
+        
+        .section-title {
+            font-size: 20px;
+            font-weight: 600;
+            margin-bottom: 16px;
+            color: #1890ff;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .section-title::before {
+            content: '🔧';
+        }
+        
+        .problem-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+        
+        .problem-card {
+            background: white;
+            border: 1px solid #e8e8e8;
+            border-radius: 8px;
+            padding: 20px;
+            transition: all 0.3s ease;
+        }
+        
+        .problem-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 8px 24px rgba(0,0,0,0.1);
+        }
+        
+        .problem-card.critical {
+            border-left: 4px solid #ff4d4f;
+        }
+        
+        .problem-card.warning {
+            border-left: 4px solid #faad14;
+        }
+        
+        .problem-card.info {
+            border-left: 4px solid #1890ff;
+        }
+        
+        .problem-title {
+            font-weight: 600;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .problem-desc {
+            color: #666;
+            font-size: 14px;
+            line-height: 1.5;
+            margin-bottom: 12px;
+        }
+        
+        .solution {
+            background: #e6f7ff;
+            border-radius: 6px;
+            padding: 12px;
+            margin-top: 12px;
+            font-size: 14px;
+        }
+        
+        .solution pre {
+            background: #f6f8fa;
+            padding: 12px;
+            border-radius: 6px;
+            overflow-x: auto;
+            margin-top: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+        }
+        
+        .test-buttons {
+            display: flex;
+            gap: 12px;
+            margin-top: 20px;
+            flex-wrap: wrap;
+        }
+        
+        .test-button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            background: #1890ff;
+            color: white;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .test-button:hover {
+            background: #096dd9;
+            transform: translateY(-2px);
+        }
+        
+        .test-button.secondary {
+            background: #f0f0f0;
+            color: #333;
+        }
+        
+        .layout-preview {
+            display: grid;
+            grid-template-columns: 200px 1fr;
+            gap: 0;
+            border: 2px solid #e8e8e8;
+            border-radius: 8px;
+            overflow: hidden;
+            margin-top: 20px;
+            height: 400px;
+        }
+        
+        .sidebar-preview {
+            background: #001529;
+            color: rgba(255,255,255,0.65);
+            padding: 16px;
+        }
+        
+        .content-preview {
+            background: white;
+            padding: 24px;
+            position: relative;
+        }
+        
+        .tab-preview {
+            background: white;
+            border: 1px solid #f0f0f0;
+            border-radius: 6px 6px 0 0;
+            padding: 12px 20px;
+            display: inline-block;
+            margin-bottom: -1px;
+            position: relative;
+            z-index: 1;
+        }
+        
+        .tab-content {
+            border: 1px solid #f0f0f0;
+            border-radius: 0 0 6px 6px;
+            padding: 24px;
+            height: calc(100% - 60px);
+        }
+        
+        .overlap-highlight {
+            position: absolute;
+            background: rgba(255, 77, 79, 0.1);
+            border: 2px dashed #ff4d4f;
+            border-radius: 4px;
+        }
+        
+        .status-badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 500;
+            margin-left: 8px;
+        }
+        
+        .status-badge.fixed {
+            background: #f6ffed;
+            color: #52c41a;
+            border: 1px solid #b7eb8f;
+        }
+        
+        .status-badge.pending {
+            background: #fff7e6;
+            color: #fa8c16;
+            border: 1px solid #ffd591;
+        }
+        
+        .status-badge.problem {
+            background: #fff2f0;
+            color: #ff4d4f;
+            border: 1px solid #ffccc7;
+        }
+        
+        .code-block {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 16px;
+            border-radius: 6px;
+            overflow-x: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            margin-top: 12px;
+        }
+        
+        .code-comment {
+            color: #6a9955;
+        }
+        
+        .code-keyword {
+            color: #569cd6;
+        }
+        
+        .code-string {
+            color: #ce9178;
+        }
+        
+        .code-number {
+            color: #b5cea8;
+        }
+        
+        @media (max-width: 768px) {
+            .content {
+                padding: 16px;
+            }
+            
+            .problem-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .layout-preview {
+                grid-template-columns: 1fr;
+                height: 300px;
+            }
+            
+            .sidebar-preview {
+                display: none;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="debug-container">
+        <div class="header">
+            <h1>🔍 Quantitative Platform UI Debug Tool</h1>
+            <p>Detect and fix Ant Design Pro layout overlap issues</p>
+        </div>
+        
+        <div class="content">
+            <!-- Problem Diagnosis Section -->
+            <div class="section">
+                <h2 class="section-title">UI Problem Diagnosis</h2>
+                <p>Detected layout issue: Sidebar overlapping with white tabs</p>
+                
+                <div class="problem-grid">
+                    <!-- Problem 1 -->
+                    <div class="problem-card critical">
+                        <div class="problem-title">
+                            <span>🚨 Sidebar Menu Overlap</span>
+                            <span class="status-badge problem">Not Fixed</span>
+                        </div>
+                        <div class="problem-desc">
+                            Left navigation menu visually overlaps with content area tabs, affecting user experience and operation.
+                        </div>
+                        <div class="solution">
+                            <strong>Solution:</strong>
+                            <pre>// 1. Adjust ProLayout contentStyle
+contentStyle={{
+  margin: '24px 16px',
+  padding: 24,
+  minHeight: 'calc(100vh - 200px)'
+}}
+
+// 2. Fix sidebar width
+siderWidth={208}
+collapsedWidth={48}</pre>
+                        </div>
+                    </div>
+                    
+                    <!-- 问题2 -->
+                    <div class="problem-card warning">
+                        <div class="problem-title">
+                            <span>⚠️ 页签间距不足</span>
+                            <span class="status-badge pending">修复中</span>
+                        </div>
+                        <div class="problem-desc">
+                            白色页签(Tabs)与侧边栏之间缺少足够的margin-left间距。
+                        </div>
+                        <div class="solution">
+                            <strong>解决方案：</strong>
+                            <pre>// 为Tabs组件添加左边距
+.ant-tabs {
+  margin-left: 16px !important;
+}
+
+// 或者为ProPageContainer添加间距
+.ant-pro-page-container {
+  padding-left: 16px !important;
+}</pre>
+                        </div>
+                    </div>
+                    
+                    <!-- 问题3 -->
+                    <div class="problem-card info">
+                        <div class="problem-title">
+                            <span>ℹ️ z-index层级冲突</span>
+                            <span class="status-badge fixed">已修复</span>
+                        </div>
+                        <div class="problem-desc">
+                            组件之间的z-index设置不当，导致显示层级混乱。
+                        </div>
+                        <div class="solution">
+                            <strong>解决方案：</strong>
+                            <pre>// 明确z-index层级
+.ant-pro-sider {
+  z-index: 99 !important;
+}
+
+.ant-pro-layout-header {
+  z-index: 100 !important;
+}
+
+.ant-tabs-nav {
+  z-index: 1 !important;
+}</pre>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 布局预览 -->
+            <div class="section">
+                <h2 class="section-title">布局预览</h2>
+                <p>当前布局结构可视化（红色区域表示重叠问题）</p>
+                
+                <div class="layout-preview">
+                    <div class="sidebar-preview">
+                        <div style="margin-bottom: 16px; font-weight: 600; color: white;">导航菜单</div>
+                        <div style="padding: 8px 12px; background: #1890ff; color: white; border-radius: 4px; margin-bottom: 8px;">仪表板</div>
+                        <div style="padding: 8px 12px; margin-bottom: 8px;">市场数据</div>
+                        <div style="padding: 8px 12px; margin-bottom: 8px;">策略回测</div>
+                        <div style="padding: 8px 12px; margin-bottom: 8px;">投资组合</div>
+                    </div>
+                    <div class="content-preview">
+                        <div class="tab-preview" style="margin-left: 0;">页签1</div>
+                        <div class="tab-preview" style="margin-left: 120px;">页签2</div>
+                        <div class="tab-preview" style="margin-left: 240px;">页签3</div>
+                        
+                        <div class="tab-content">
+                            <p>内容区域 - 这里应该显示页面内容</p>
+                            <p style="color: #ff4d4f; margin-top: 20px;">
+                                ❌ 问题：页签与侧边栏重叠，需要增加左边距
+                            </p>
+                        </div>
+                        
+                        <!-- 重叠高亮区域 -->
+                        <div class="overlap-highlight" style="top: 0; left: 0; width: 200px; height: 40px;"></div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 修复测试 -->
+            <div class="section">
+                <h2 class="section-title">修复测试</h2>
+                <p>应用以下修复方案并测试效果</p>
+                
+                <div class="test-buttons">
+                    <button class="test-button" onclick="applyFix('margin')">应用边距修复</button>
+                    <button class="test-button" onclick="applyFix('zindex')">应用层级修复</button>
+                    <button class="test-button" onclick="applyFix('responsive')">应用响应式修复</button>
+                    <button class="test-button secondary" onclick="resetLayout()">重置布局</button>
+                </div>
+                
+                <div id="test-result" style="margin-top: 20px; padding: 16px; background: #f6ffed; border-radius: 6px; display: none;">
+                    ✅ 修复已应用，请刷新页面查看效果
+                </div>
+            </div>
+            
+            <!-- 代码修复 -->
+            <div class="section">
+                <h2 class="section-title">代码修复方案</h2>
+                <p>完整的BasicLayout.tsx修复代码</p>
+                
+                <div class="code-block">
+<span class="code-comment">// 修复后的ProLayout配置</span><br>
+<span class="code-keyword">const</span> BasicLayout: React.FC = ({ children }) => {<br>
+&nbsp;&nbsp;<span class="code-keyword">return</span> (<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&lt;ProLayout<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="code-comment">// 关键修复：内容区域间距</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;contentStyle={{<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;margin: <span class="code-string">'24px 16px'</span>,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;padding: <span class="code-number">24</span>,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;background: <span class="code-string">'#fff'</span>,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;borderRadius: <span class="code-number">8</span>,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;minHeight: <span class="code-string">'calc(100vh - 200px)'</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}}<br>
+<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="code-comment">// 固定侧边栏宽度</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;siderWidth={<span class="code-number">208</span>}<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;collapsedWidth={<span class="code-number">48</span>}<br>
+<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="code-comment">// 确保整体布局有左边距</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;style={{<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;marginLeft: <span class="code-string">'16px'</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}}<br>
+<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="code-comment">// 修复页签重叠</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;menu={{<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;style: {<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;marginTop: <span class="code-string">'8px'</span>,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;marginBottom: <span class="code-string">'8px'</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}}<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&gt;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{children}<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&lt;/ProLayout&gt;<br>
+&nbsp;&nbsp;);<br>
+};<br>
+                </div>
+            </
