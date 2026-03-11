@@ -6,15 +6,55 @@ A modern quantitative trading platform with frontend-backend separation architec
 
 ```
 professional_quant_platform/
-├── frontend/          # React frontend application
+│
+├── backend/          # Python Flask backend
+│   ├── start_quant_backend.py  # Main application file
+│   ├── requirements.txt        # Python dependencies
+│   ├── .env                   # Environment configuration
+│   └── test_equity_curve.py   # Equity curve testing
+│
+├── frontend/         # React frontend application
 │   ├── src/          # Source code
 │   ├── public/       # Static resources
 │   └── package.json  # Frontend dependencies
-├── backend/          # Python Flask backend
-│   ├── start_quant_backend.py  # Main application file
-│   ├── requirements.txt  # Python dependencies
-│   └── .env          # Environment configuration
-└── README.md         # Project documentation
+│
+├── scripts/          # Startup and utility scripts
+│   ├── start_backend.bat
+│   ├── start_frontend.bat
+│   ├── start_platform.bat
+│   ├── start_all.bat
+│   ├── start_platform.ps1
+│   ├── check_python.bat
+│   ├── check_python.ps1
+│   └── check-english-files.ps1
+│
+├── tests/            # Test scripts
+│   ├── test_all.py
+│   ├── test_api_response.py
+│   ├── test_api_sync.py
+│   ├── test_backtest.py
+│   ├── test_direct.py
+│   ├── test_extreme_case.py
+│   ├── test_future_dates.py
+│   ├── test_import.py
+│   └── test_profit_bug.py
+│
+├── dev/              # Development and debugging scripts
+│   ├── debug_backtest.py
+│   ├── debug_strategy_returns.py
+│   └── network_diagnostic.py
+│
+├── docs/             # Documentation
+│   ├── DEBUG_REPORT.md
+│   ├── FIX_GUIDE.md
+│   ├── FRONTEND_FIX_SUMMARY.md
+│   ├── INTEGRATION_REPORT.md
+│   ├── VERIFY_CHANGES.md
+│   ├── PYTHON_SETUP.md
+│   └── QUICK_START.md
+│
+├── README.md         # Main project documentation
+└── .gitignore        # Git ignore rules
 ```
 
 ## Quick Start
@@ -36,7 +76,7 @@ python start_quant_backend.py
 ```
 Backend will start at http://localhost:8889
 
-Detailed Python installation guide: [PYTHON_SETUP.md](./PYTHON_SETUP.md)
+Detailed Python installation guide: [PYTHON_SETUP.md](./docs/PYTHON_SETUP.md)
 
 ## Features
 
@@ -175,7 +215,7 @@ docker-compose up --build
 
 ## Troubleshooting
 
-Common issues and solutions: [DEBUG_REPORT.md](./DEBUG_REPORT.md)
+Common issues and solutions: [DEBUG_REPORT.md](./docs/DEBUG_REPORT.md)
 
 ## Project Status
 

@@ -588,3 +588,13 @@ Call stack:
     results = run_real_backtest(symbol, strategy, start_date, end_date, initial_capital)
   File "C:\Users\kexuc\.openclaw\workspace\professional_quant_platform\backend\start_quant_backend.py", line 482, in run_real_backtest
     for line in traceback.format_stack()[-3:]:
+
+=== 2026-03-10T19:55:06.818598 ===
+Symbol: AAPL, Strategy: moving_average, Start: 2025-03-10, End: 2026-03-10
+Call stack:
+  File "C:\Users\kexuc\AppData\Local\Programs\Python\Python311\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+  File "C:\Users\kexuc\.openclaw\workspace\professional_quant_platform\backend\start_quant_backend.py", line 613, in run_backtest
+    results = run_real_backtest(symbol, strategy, start_date, end_date, initial_capital)
+  File "C:\Users\kexuc\.openclaw\workspace\professional_quant_platform\backend\start_quant_backend.py", line 482, in run_real_backtest
+    for line in traceback.format_stack()[-3:]:
