@@ -598,3 +598,233 @@ Call stack:
     results = run_real_backtest(symbol, strategy, start_date, end_date, initial_capital)
   File "C:\Users\kexuc\.openclaw\workspace\professional_quant_platform\backend\start_quant_backend.py", line 482, in run_real_backtest
     for line in traceback.format_stack()[-3:]:
+
+=== 2026-03-12T20:21:10.587857 ===
+Symbol: TSLA, Strategy: moving_average, Start: 2025-03-12, End: 2026-03-12
+Call stack:
+  File "C:\Users\kexuc\AppData\Local\Programs\Python\Python311\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+  File "C:\Users\kexuc\.openclaw\workspace\professional_quant_platform\backend\start_quant_backend.py", line 826, in run_backtest
+    results = run_real_backtest(symbol, strategy, start_date, end_date, initial_capital)
+  File "C:\Users\kexuc\.openclaw\workspace\professional_quant_platform\backend\start_quant_backend.py", line 691, in run_real_backtest
+    for line in traceback.format_stack()[-3:]:
+
+=== 2026-03-12T20:27:18.607140 ===
+Symbol: TSLA, Strategy: moving_average, Start: 2025-03-12, End: 2026-03-12
+Call stack:
+  File "C:\Users\kexuc\AppData\Local\Programs\Python\Python311\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+  File "C:\Users\kexuc\.openclaw\workspace\professional_quant_platform\backend\start_quant_backend.py", line 826, in run_backtest
+    results = run_real_backtest(symbol, strategy, start_date, end_date, initial_capital)
+  File "C:\Users\kexuc\.openclaw\workspace\professional_quant_platform\backend\start_quant_backend.py", line 691, in run_real_backtest
+    for line in traceback.format_stack()[-3:]:
+
+=== 2026-03-12T20:29:04.772818 ===
+Symbol: TSLA, Strategy: moving_average, Start: 2025-03-12, End: 2026-03-12
+Call stack:
+  File "C:\Users\kexuc\AppData\Local\Programs\Python\Python311\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+  File "C:\Users\kexuc\.openclaw\workspace\professional_quant_platform\backend\start_quant_backend.py", line 826, in run_backtest
+    results = run_real_backtest(symbol, strategy, start_date, end_date, initial_capital)
+  File "C:\Users\kexuc\.openclaw\workspace\professional_quant_platform\backend\start_quant_backend.py", line 691, in run_real_backtest
+    for line in traceback.format_stack()[-3:]:
+
+=== 2026-03-12T20:37:40.012895 ===
+Symbol: AAPL, Strategy: moving_average, Start: 2025-03-12, End: 2026-03-12
+Call stack:
+  File "C:\Users\kexuc\AppData\Local\Programs\Python\Python311\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+  File "C:\Users\kexuc\.openclaw\workspace\professional_quant_platform\backend\start_quant_backend.py", line 826, in run_backtest
+    results = run_real_backtest(symbol, strategy, start_date, end_date, initial_capital)
+  File "C:\Users\kexuc\.openclaw\workspace\professional_quant_platform\backend\start_quant_backend.py", line 691, in run_real_backtest
+    for line in traceback.format_stack()[-3:]:
+
+=== 2026-03-12T20:48:28.242766 ===
+Symbol: AAPL, Strategy: moving_average, Start: 2025-03-12, End: 2026-03-12
+Call stack:
+  File "C:\Users\kexuc\AppData\Local\Programs\Python\Python311\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+  File "C:\Users\kexuc\.openclaw\workspace\professional_quant_platform\backend\start_quant_backend.py", line 826, in run_backtest
+    results = run_real_backtest(symbol, strategy, start_date, end_date, initial_capital)
+  File "C:\Users\kexuc\.openclaw\workspace\professional_quant_platform\backend\start_quant_backend.py", line 691, in run_real_backtest
+    for line in traceback.format_stack()[-3:]:
+
+=== 2026-03-12T20:54:57.558627 ===
+Symbol: AAPL, Strategy: moving_average, Start: 2025-03-12, End: 2026-03-12
+Call stack:
+  File "C:\Users\kexuc\AppData\Local\Programs\Python\Python311\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+  File "C:\Users\kexuc\.openclaw\workspace\professional_quant_platform\backend\start_quant_backend.py", line 826, in run_backtest
+    results = run_real_backtest(symbol, strategy, start_date, end_date, initial_capital)
+  File "C:\Users\kexuc\.openclaw\workspace\professional_quant_platform\backend\start_quant_backend.py", line 691, in run_real_backtest
+    for line in traceback.format_stack()[-3:]:
+
+=== 2026-03-12T20:57:49.188846 ===
+Symbol: AAPL, Strategy: moving_average, Start: 2025-03-12, End: 2026-03-12
+Call stack:
+  File "C:\Users\kexuc\AppData\Local\Programs\Python\Python311\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+  File "C:\Users\kexuc\.openclaw\workspace\professional_quant_platform\backend\start_quant_backend.py", line 826, in run_backtest
+    results = run_real_backtest(symbol, strategy, start_date, end_date, initial_capital)
+  File "C:\Users\kexuc\.openclaw\workspace\professional_quant_platform\backend\start_quant_backend.py", line 691, in run_real_backtest
+    for line in traceback.format_stack()[-3:]:
+
+=== 2026-03-12T21:06:34.483803 ===
+Symbol: AAPL, Strategy: moving_average, Start: 2025-03-12, End: 2026-03-12
+Call stack:
+  File "C:\Users\kexuc\AppData\Local\Programs\Python\Python311\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+  File "C:\Users\kexuc\.openclaw\workspace\professional_quant_platform\backend\start_quant_backend.py", line 826, in run_backtest
+    results = run_real_backtest(symbol, strategy, start_date, end_date, initial_capital)
+  File "C:\Users\kexuc\.openclaw\workspace\professional_quant_platform\backend\start_quant_backend.py", line 691, in run_real_backtest
+    for line in traceback.format_stack()[-3:]:
+
+=== 2026-03-12T21:17:00.312413 ===
+Symbol: AAPL, Strategy: moving_average, Start: 2025-03-12, End: 2026-03-12
+Call stack:
+  File "C:\Users\kexuc\AppData\Local\Programs\Python\Python311\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+  File "C:\Users\kexuc\.openclaw\workspace\professional_quant_platform\backend\start_quant_backend.py", line 826, in run_backtest
+    results = run_real_backtest(symbol, strategy, start_date, end_date, initial_capital)
+  File "C:\Users\kexuc\.openclaw\workspace\professional_quant_platform\backend\start_quant_backend.py", line 691, in run_real_backtest
+    for line in traceback.format_stack()[-3:]:
+
+=== 2026-03-12T21:28:13.649965 ===
+Symbol: AAPL, Strategy: moving_average, Start: 2025-03-12, End: 2026-03-12
+Call stack:
+  File "C:\Users\kexuc\AppData\Local\Programs\Python\Python311\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+  File "C:\Users\kexuc\.openclaw\workspace\professional_quant_platform\backend\start_quant_backend.py", line 826, in run_backtest
+    results = run_real_backtest(symbol, strategy, start_date, end_date, initial_capital)
+  File "C:\Users\kexuc\.openclaw\workspace\professional_quant_platform\backend\start_quant_backend.py", line 691, in run_real_backtest
+    for line in traceback.format_stack()[-3:]:
+
+=== 2026-03-12T21:37:30.979500 ===
+Symbol: AAPL, Strategy: moving_average, Start: 2025-03-12, End: 2026-03-12
+Call stack:
+  File "C:\Users\kexuc\AppData\Local\Programs\Python\Python311\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+  File "C:\Users\kexuc\.openclaw\workspace\professional_quant_platform\backend\start_quant_backend.py", line 826, in run_backtest
+    results = run_real_backtest(symbol, strategy, start_date, end_date, initial_capital)
+  File "C:\Users\kexuc\.openclaw\workspace\professional_quant_platform\backend\start_quant_backend.py", line 691, in run_real_backtest
+    for line in traceback.format_stack()[-3:]:
+
+=== 2026-03-12T21:37:54.133760 ===
+Symbol: AAPL, Strategy: rsi, Start: 2025-03-12, End: 2026-03-12
+Call stack:
+  File "C:\Users\kexuc\AppData\Local\Programs\Python\Python311\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+  File "C:\Users\kexuc\.openclaw\workspace\professional_quant_platform\backend\start_quant_backend.py", line 826, in run_backtest
+    results = run_real_backtest(symbol, strategy, start_date, end_date, initial_capital)
+  File "C:\Users\kexuc\.openclaw\workspace\professional_quant_platform\backend\start_quant_backend.py", line 691, in run_real_backtest
+    for line in traceback.format_stack()[-3:]:
+
+=== 2026-03-12T21:38:22.556403 ===
+Symbol: AAPL, Strategy: moving_average, Start: 2025-03-12, End: 2026-03-12
+Call stack:
+  File "C:\Users\kexuc\AppData\Local\Programs\Python\Python311\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+  File "C:\Users\kexuc\.openclaw\workspace\professional_quant_platform\backend\start_quant_backend.py", line 826, in run_backtest
+    results = run_real_backtest(symbol, strategy, start_date, end_date, initial_capital)
+  File "C:\Users\kexuc\.openclaw\workspace\professional_quant_platform\backend\start_quant_backend.py", line 691, in run_real_backtest
+    for line in traceback.format_stack()[-3:]:
+
+=== 2026-03-12T21:46:07.328595 ===
+Symbol: AAPL, Strategy: moving_average, Start: 2025-03-12, End: 2026-03-12
+Call stack:
+  File "C:\Users\kexuc\AppData\Local\Programs\Python\Python311\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+  File "C:\Users\kexuc\.openclaw\workspace\professional_quant_platform\backend\start_quant_backend.py", line 826, in run_backtest
+    results = run_real_backtest(symbol, strategy, start_date, end_date, initial_capital)
+  File "C:\Users\kexuc\.openclaw\workspace\professional_quant_platform\backend\start_quant_backend.py", line 691, in run_real_backtest
+    for line in traceback.format_stack()[-3:]:
+
+=== 2026-03-12T21:58:49.597525 ===
+Symbol: AAPL, Strategy: moving_average, Start: 2025-03-12, End: 2026-03-12
+Call stack:
+  File "C:\Users\kexuc\AppData\Local\Programs\Python\Python311\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+  File "C:\Users\kexuc\.openclaw\workspace\professional_quant_platform\backend\start_quant_backend.py", line 826, in run_backtest
+    results = run_real_backtest(symbol, strategy, start_date, end_date, initial_capital)
+  File "C:\Users\kexuc\.openclaw\workspace\professional_quant_platform\backend\start_quant_backend.py", line 691, in run_real_backtest
+    for line in traceback.format_stack()[-3:]:
+
+=== 2026-03-12T22:31:16.950171 ===
+Symbol: AAPL, Strategy: moving_average, Start: 2025-03-12, End: 2026-03-12
+Call stack:
+  File "C:\Users\kexuc\AppData\Local\Programs\Python\Python311\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+  File "C:\Users\kexuc\.openclaw\workspace\professional_quant_platform\backend\start_quant_backend.py", line 826, in run_backtest
+    results = run_real_backtest(symbol, strategy, start_date, end_date, initial_capital)
+  File "C:\Users\kexuc\.openclaw\workspace\professional_quant_platform\backend\start_quant_backend.py", line 691, in run_real_backtest
+    for line in traceback.format_stack()[-3:]:
+
+=== 2026-03-13T01:17:42.344177 ===
+Symbol: AAPL, Strategy: moving_average, Start: 2025-03-13, End: 2026-03-13
+Call stack:
+  File "C:\Users\kexuc\AppData\Local\Programs\Python\Python311\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+  File "C:\Users\kexuc\.openclaw\workspace\professional_quant_platform\backend\start_quant_backend.py", line 826, in run_backtest
+    results = run_real_backtest(symbol, strategy, start_date, end_date, initial_capital)
+  File "C:\Users\kexuc\.openclaw\workspace\professional_quant_platform\backend\start_quant_backend.py", line 691, in run_real_backtest
+    for line in traceback.format_stack()[-3:]:
+
+=== 2026-03-13T01:56:45.693363 ===
+Symbol: AAPL, Strategy: moving_average, Start: 2025-03-13, End: 2026-03-13
+Call stack:
+  File "C:\Users\kexuc\AppData\Local\Programs\Python\Python311\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+  File "C:\Users\kexuc\.openclaw\workspace\professional_quant_platform\backend\start_quant_backend.py", line 826, in run_backtest
+    results = run_real_backtest(symbol, strategy, start_date, end_date, initial_capital)
+  File "C:\Users\kexuc\.openclaw\workspace\professional_quant_platform\backend\start_quant_backend.py", line 691, in run_real_backtest
+    for line in traceback.format_stack()[-3:]:
+
+=== 2026-03-13T01:58:38.422807 ===
+Symbol: AAPL, Strategy: moving_average, Start: 2025-03-13, End: 2026-03-13
+Call stack:
+  File "C:\Users\kexuc\AppData\Local\Programs\Python\Python311\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+  File "C:\Users\kexuc\.openclaw\workspace\professional_quant_platform\backend\start_quant_backend.py", line 826, in run_backtest
+    results = run_real_backtest(symbol, strategy, start_date, end_date, initial_capital)
+  File "C:\Users\kexuc\.openclaw\workspace\professional_quant_platform\backend\start_quant_backend.py", line 691, in run_real_backtest
+    for line in traceback.format_stack()[-3:]:
+
+=== 2026-03-13T02:04:03.159551 ===
+Symbol: AAPL, Strategy: moving_average, Start: 2025-03-13, End: 2026-03-13
+Call stack:
+  File "C:\Users\kexuc\AppData\Local\Programs\Python\Python311\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+  File "C:\Users\kexuc\.openclaw\workspace\professional_quant_platform\backend\start_quant_backend.py", line 826, in run_backtest
+    results = run_real_backtest(symbol, strategy, start_date, end_date, initial_capital)
+  File "C:\Users\kexuc\.openclaw\workspace\professional_quant_platform\backend\start_quant_backend.py", line 691, in run_real_backtest
+    for line in traceback.format_stack()[-3:]:
+
+=== 2026-03-13T02:04:41.084378 ===
+Symbol: AAPL, Strategy: moving_average, Start: 2025-09-13, End: 2026-03-13
+Call stack:
+  File "C:\Users\kexuc\AppData\Local\Programs\Python\Python311\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+  File "C:\Users\kexuc\.openclaw\workspace\professional_quant_platform\backend\start_quant_backend.py", line 826, in run_backtest
+    results = run_real_backtest(symbol, strategy, start_date, end_date, initial_capital)
+  File "C:\Users\kexuc\.openclaw\workspace\professional_quant_platform\backend\start_quant_backend.py", line 691, in run_real_backtest
+    for line in traceback.format_stack()[-3:]:
+
+=== 2026-03-13T02:22:58.874106 ===
+Symbol: AAPL, Strategy: moving_average, Start: 2025-03-13, End: 2026-03-13
+Call stack:
+  File "C:\Users\kexuc\AppData\Local\Programs\Python\Python311\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+  File "C:\Users\kexuc\.openclaw\workspace\professional_quant_platform\backend\start_quant_backend.py", line 826, in run_backtest
+    results = run_real_backtest(symbol, strategy, start_date, end_date, initial_capital)
+  File "C:\Users\kexuc\.openclaw\workspace\professional_quant_platform\backend\start_quant_backend.py", line 691, in run_real_backtest
+    for line in traceback.format_stack()[-3:]:
+
+=== 2026-03-13T02:24:37.419956 ===
+Symbol: AAPL, Strategy: moving_average, Start: 2025-12-13, End: 2026-03-13
+Call stack:
+  File "C:\Users\kexuc\AppData\Local\Programs\Python\Python311\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+  File "C:\Users\kexuc\.openclaw\workspace\professional_quant_platform\backend\start_quant_backend.py", line 826, in run_backtest
+    results = run_real_backtest(symbol, strategy, start_date, end_date, initial_capital)
+  File "C:\Users\kexuc\.openclaw\workspace\professional_quant_platform\backend\start_quant_backend.py", line 691, in run_real_backtest
+    for line in traceback.format_stack()[-3:]:

@@ -43,12 +43,27 @@ interface BacktestResult {
       sma20?: number;
       sma50?: number;
     }>;
+    // 后端返回的额外交易统计字段
+    avgWin?: number;
+    avgLoss?: number;
   };
   parameters: {
     strategy: string;
     symbols: string[];
     period: string;
     initialCapital: number;
+    // 策略特定参数
+    shortMaPeriod?: number;
+    longMaPeriod?: number;
+    rsiPeriod?: number;
+    rsiOversold?: number;
+    rsiOverbought?: number;
+    macdFast?: number;
+    macdSlow?: number;
+    macdSignal?: number;
+    // 日期参数
+    startDate?: string;
+    endDate?: string;
   };
   createdAt?: string;
   drawdownCurve?: Array<{ date: string; drawdown: number }>;
@@ -96,6 +111,7 @@ const Backtest: React.FC = () => {
   const [error, setError] = useState<string>('');
   const [historyLoading, setHistoryLoading] = useState(true);
   const [selectedBacktests, setSelectedBacktests] = useState<string[]>([]);
+  const [selectedStrategy, setSelectedStrategy] = useState<string>('moving_average');
 
   // 设置默认日期范围（最近1年）使用 dayjs
   const defaultDateRange = () => {
@@ -215,13 +231,41 @@ const Backtest: React.FC = () => {
     
     try {
       const symbol = values.symbol.toUpperCase();
-      const config = {
+      const strategy = values.strategy;
+      
+      // 构建基础配置
+      const config: any = {
         symbol: symbol,
-        strategy: values.strategy,
+        strategy: strategy,
         startDate: values.dateRange[0].format('YYYY-MM-DD'),
         endDate: values.dateRange[1].format('YYYY-MM-DD'),
         initialCapital: values.initialCapital,
       };
+      
+      // 根据策略类型添加对应的参数
+      if (strategy === 'moving_average') {
+        config.parameters = {
+          shortMaPeriod: values.shortMaPeriod || 20,
+          longMaPeriod: values.longMaPeriod || 50,
+        };
+      } else if (strategy === 'rsi') {
+        // RSI 策略参数（预留结构，后端暂未实现）
+        config.parameters = {
+          rsiPeriod: values.rsiPeriod || 14,
+          rsiOversold: values.rsiOversold || 30,
+          rsiOverbought: values.rsiOverbought || 70,
+        };
+      } else if (strategy === 'macd') {
+        // MACD 策略参数（预留结构，后端暂未实现）
+        config.parameters = {
+          macdFast: values.macdFast || 12,
+          macdSlow: values.macdSlow || 26,
+          macdSignal: values.macdSignal || 9,
+        };
+      } else {
+        // 其他策略暂时不传参数
+        config.parameters = {};
+      }
       
       console.log('Running backtest with config:', config);
       
@@ -662,6 +706,17 @@ const Backtest: React.FC = () => {
                 symbol: '',
                 strategy: 'moving_average',
                 initialCapital: 100000,
+                // Moving Average parameters
+                shortMaPeriod: 20,
+                longMaPeriod: 50,
+                // RSI parameters (预留)
+                rsiPeriod: 14,
+                rsiOversold: 30,
+                rsiOverbought: 70,
+                // MACD parameters (预留)
+                macdFast: 12,
+                macdSlow: 26,
+                macdSignal: 9,
               }}
             >
               <Row gutter={16}>
@@ -690,7 +745,11 @@ const Backtest: React.FC = () => {
                     name="strategy"
                     rules={[{ required: true, message: 'Please select a strategy' }]}
                   >
-                    <Select size="large" placeholder="Select strategy">
+                    <Select 
+                      size="large" 
+                      placeholder="Select strategy"
+                      onChange={(value) => setSelectedStrategy(value)}
+                    >
                       {strategyOptions.map(option => (
                         <Option key={option.value} value={option.value}>
                           {option.label} {option.type === 'simulated' ? '(Simulated)' : '(Real)'}
@@ -700,6 +759,198 @@ const Backtest: React.FC = () => {
                   </Form.Item>
                 </Col>
               </Row>
+              
+              {/* Strategy Parameters Panel - Dynamic based on selected strategy */}
+              <div style={{ marginBottom: '16px', padding: '16px', background: '#fafafa', borderRadius: '8px' }}>
+                <h4 style={{ marginBottom: '12px' }}>Strategy Parameters</h4>
+                
+                {/* Moving Average Crossover Parameters */}
+                {selectedStrategy === 'moving_average' && (
+                  <Row gutter={16}>
+                    <Col span={12}>
+                      <Form.Item
+                        label="Short MA Period"
+                        name="shortMaPeriod"
+                        initialValue={20}
+                        rules={[
+                          { required: true, message: 'Please enter Short MA Period' },
+                          { type: 'number', min: 1, max: 200, message: 'Must be between 1 and 200' },
+                        ]}
+                        help="Default: 20"
+                      >
+                        <InputNumber
+                          min={1}
+                          max={200}
+                          size="large"
+                          style={{ width: '100%' }}
+                        />
+                      </Form.Item>
+                    </Col>
+                    <Col span={12}>
+                      <Form.Item
+                        label="Long MA Period"
+                        name="longMaPeriod"
+                        initialValue={50}
+                        dependencies={['shortMaPeriod']}
+                        rules={[
+                          { required: true, message: 'Please enter Long MA Period' },
+                          { type: 'number', min: 1, max: 200, message: 'Must be between 1 and 200' },
+                          ({ getFieldValue }) => ({
+                            validator(_, value) {
+                              const shortMaPeriod = getFieldValue('shortMaPeriod');
+                              if (!value || !shortMaPeriod || value > shortMaPeriod) {
+                                return Promise.resolve();
+                              }
+                              return Promise.reject(new Error('Long MA Period must be greater than Short MA Period'));
+                            },
+                          }),
+                        ]}
+                        help="Default: 50 (must be > Short MA Period)"
+                      >
+                        <InputNumber
+                          min={1}
+                          max={200}
+                          size="large"
+                          style={{ width: '100%' }}
+                        />
+                      </Form.Item>
+                    </Col>
+                  </Row>
+                )}
+                
+                {/* RSI Strategy Parameters (预留结构) */}
+                {selectedStrategy === 'rsi' && (
+                  <Row gutter={16}>
+                    <Col span={12}>
+                      <Form.Item
+                        label="RSI Period"
+                        name="rsiPeriod"
+                        initialValue={14}
+                        rules={[
+                          { required: true, message: 'Please enter RSI Period' },
+                          { type: 'number', min: 1, max: 50, message: 'Must be between 1 and 50' },
+                        ]}
+                        help="Default: 14"
+                      >
+                        <InputNumber
+                          min={1}
+                          max={50}
+                          size="large"
+                          style={{ width: '100%' }}
+                        />
+                      </Form.Item>
+                    </Col>
+                    <Col span={12}>
+                      <Form.Item
+                        label="Oversold Level"
+                        name="rsiOversold"
+                        initialValue={30}
+                        rules={[
+                          { required: true, message: 'Please enter Oversold Level' },
+                          { type: 'number', min: 1, max: 100, message: 'Must be between 1 and 100' },
+                        ]}
+                        help="Default: 30"
+                      >
+                        <InputNumber
+                          min={1}
+                          max={100}
+                          size="large"
+                          style={{ width: '100%' }}
+                        />
+                      </Form.Item>
+                    </Col>
+                    <Col span={12}>
+                      <Form.Item
+                        label="Overbought Level"
+                        name="rsiOverbought"
+                        initialValue={70}
+                        rules={[
+                          { required: true, message: 'Please enter Overbought Level' },
+                          { type: 'number', min: 1, max: 100, message: 'Must be between 1 and 100' },
+                        ]}
+                        help="Default: 70"
+                      >
+                        <InputNumber
+                          min={1}
+                          max={100}
+                          size="large"
+                          style={{ width: '100%' }}
+                        />
+                      </Form.Item>
+                    </Col>
+                  </Row>
+                )}
+                
+                {/* MACD Strategy Parameters (预留结构) */}
+                {selectedStrategy === 'macd' && (
+                  <Row gutter={16}>
+                    <Col span={12}>
+                      <Form.Item
+                        label="Fast Period"
+                        name="macdFast"
+                        initialValue={12}
+                        rules={[
+                          { required: true, message: 'Please enter Fast Period' },
+                          { type: 'number', min: 1, max: 50, message: 'Must be between 1 and 50' },
+                        ]}
+                        help="Default: 12"
+                      >
+                        <InputNumber
+                          min={1}
+                          max={50}
+                          size="large"
+                          style={{ width: '100%' }}
+                        />
+                      </Form.Item>
+                    </Col>
+                    <Col span={12}>
+                      <Form.Item
+                        label="Slow Period"
+                        name="macdSlow"
+                        initialValue={26}
+                        rules={[
+                          { required: true, message: 'Please enter Slow Period' },
+                          { type: 'number', min: 1, max: 50, message: 'Must be between 1 and 50' },
+                        ]}
+                        help="Default: 26"
+                      >
+                        <InputNumber
+                          min={1}
+                          max={50}
+                          size="large"
+                          style={{ width: '100%' }}
+                        />
+                      </Form.Item>
+                    </Col>
+                    <Col span={12}>
+                      <Form.Item
+                        label="Signal Period"
+                        name="macdSignal"
+                        initialValue={9}
+                        rules={[
+                          { required: true, message: 'Please enter Signal Period' },
+                          { type: 'number', min: 1, max: 50, message: 'Must be between 1 and 50' },
+                        ]}
+                        help="Default: 9"
+                      >
+                        <InputNumber
+                          min={1}
+                          max={50}
+                          size="large"
+                          style={{ width: '100%' }}
+                        />
+                      </Form.Item>
+                    </Col>
+                  </Row>
+                )}
+                
+                {/* Other Strategies - Placeholder */}
+                {!['moving_average', 'rsi', 'macd'].includes(selectedStrategy) && (
+                  <div style={{ textAlign: 'center', padding: '20px', color: '#999' }}>
+                    No specific parameters required for this strategy.
+                  </div>
+                )}
+              </div>
               
               <Row gutter={16}>
                 <Col span={12}>
@@ -750,6 +1001,90 @@ const Backtest: React.FC = () => {
           {backtestResult && (
             <div ref={resultsRef}>
               <Card title="Backtest Results" style={{ marginTop: 16 }}>
+                {/* Top Summary Cards */}
+                {backtestResult?.results && (
+                  <div style={{ marginBottom: '24px' }}>
+                    <Row gutter={[16, 16]}>
+                      <Col span={4}>
+                        <Card size="small" style={{ textAlign: 'center' }}>
+                          <Statistic
+                            title="Total Return"
+                            value={backtestResult.results.totalReturn || 0}
+                            precision={2}
+                            suffix="%"
+                            valueStyle={{
+                              color: (backtestResult.results.totalReturn || 0) >= 0 ? '#3f8600' : '#cf1322',
+                              fontWeight: 'bold'
+                            }}
+                          />
+                        </Card>
+                      </Col>
+                      <Col span={4}>
+                        <Card size="small" style={{ textAlign: 'center' }}>
+                          <Statistic
+                            title="Sharpe Ratio"
+                            value={backtestResult.results.sharpeRatio || 0}
+                            precision={2}
+                            valueStyle={{
+                              color:
+                                (backtestResult.results.sharpeRatio || 0) >= 1
+                                  ? '#3f8600'
+                                  : (backtestResult.results.sharpeRatio || 0) >= 0
+                                  ? '#fa8c16'
+                                  : '#cf1322',
+                              fontWeight: 'bold'
+                            }}
+                          />
+                        </Card>
+                      </Col>
+                      <Col span={4}>
+                        <Card size="small" style={{ textAlign: 'center' }}>
+                          <Statistic
+                            title="Max Drawdown"
+                            value={backtestResult.results.maxDrawdown || 0}
+                            precision={2}
+                            suffix="%"
+                            valueStyle={{
+                              color: '#cf1322',
+                              fontWeight: 'bold'
+                            }}
+                          />
+                        </Card>
+                      </Col>
+                      <Col span={4}>
+                        <Card size="small" style={{ textAlign: 'center' }}>
+                          <Statistic
+                            title="Win Rate"
+                            value={backtestResult.results.winRate || 0}
+                            precision={1}
+                            suffix="%"
+                            valueStyle={{
+                              color:
+                                (backtestResult.results.winRate || 0) >= 60
+                                  ? '#3f8600'
+                                  : (backtestResult.results.winRate || 0) >= 40
+                                  ? '#fa8c16'
+                                  : '#cf1322',
+                              fontWeight: 'bold'
+                            }}
+                          />
+                        </Card>
+                      </Col>
+                      <Col span={4}>
+                        <Card size="small" style={{ textAlign: 'center' }}>
+                          <Statistic
+                            title="Total Trades"
+                            value={backtestResult.results.trades || 0}
+                            valueStyle={{
+                              fontWeight: 'bold'
+                            }}
+                          />
+                        </Card>
+                      </Col>
+                    </Row>
+                  </div>
+                )}
+                
                 <Tabs
                   defaultActiveKey="results"
                   items={[
@@ -1066,17 +1401,321 @@ const Backtest: React.FC = () => {
                       key: 'trades',
                       label: 'Trades',
                       children: (
-                        <div style={{ padding: '40px', textAlign: 'center', color: '#999' }}>
-                          Trade log will be displayed here
-                        </div>
+                        <>
+                          <h4 style={{ marginBottom: '16px' }}>Trade Log</h4>
+                          {backtestResult?.results?.trades && backtestResult.results.trades > 0 ? (
+                            <>
+                              {/* Trade Summary and Mock Data Generation */}
+                              {(() => {
+                                // 优先逻辑：如果后端有真实 trade list，用真实数据
+                                // 目前后端没有返回 trade list，使用前端 mock data 作为临时兜底
+                                
+                                // 获取当前 symbol（优先使用 backtestResult 的 symbol，否则用表单的 symbol）
+                                const currentSymbol = backtestResult?.parameters?.symbols?.[0] || form.getFieldValue('symbol') || 'AAPL';
+                                const tradeCount = backtestResult.results.trades || 10;
+                                
+                                // 生成模拟交易数据并计算统计（只生成一次）
+                                const startDate = new Date();
+                                startDate.setDate(startDate.getDate() - tradeCount);
+                                
+                                const trades = [];
+                                let winningTrades = 0;
+                                let losingTrades = 0;
+                                let totalPnl = 0;
+                                
+                                // 基于真实后端数据的统计信息来生成合理的模拟数据
+                                const winRate = backtestResult.results.winRate || 50;
+                                const avgWin = backtestResult.results.avgWin || 500;
+                                const avgLoss = backtestResult.results.avgLoss || -300;
+                                
+                                for (let i = 0; i < tradeCount; i++) {
+                                  const date = new Date(startDate);
+                                  date.setDate(date.getDate() + i);
+                                  
+                                  // 基于真实胜率生成交易结果
+                                  const isWin = Math.random() * 100 < winRate;
+                                  const action = i % 2 === 0 ? 'BUY' : 'SELL';
+                                  const price = 100 + Math.random() * 100;
+                                  const quantity = Math.floor(Math.random() * 100) + 10;
+                                  
+                                  // 基于真实平均盈亏生成 PnL
+                                  const pnl = isWin 
+                                    ? avgWin * (0.8 + Math.random() * 0.4) // 80%-120% 的 avgWin
+                                    : avgLoss * (0.8 + Math.random() * 0.4); // 80%-120% 的 avgLoss
+                                  
+                                  const returnVal = (pnl / (price * quantity)) * 100;
+                                  
+                                  if (pnl > 0) winningTrades++;
+                                  else if (pnl < 0) losingTrades++;
+                                  totalPnl += pnl;
+                                  
+                                  trades.push({
+                                    key: i,
+                                    date: date.toISOString().split('T')[0],
+                                    symbol: currentSymbol,
+                                    action,
+                                    price,
+                                    quantity,
+                                    pnl,
+                                    return: returnVal,
+                                  });
+                                }
+                                
+                                const averagePnl = totalPnl / tradeCount;
+                                
+                                // 按日期倒序排序
+                                const sortedTrades = trades.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+                                
+                                return (
+                                  <>
+                                    {/* Trade Summary - 基于模拟数据计算 */}
+                                    <div style={{ marginBottom: '16px', padding: '12px', background: '#fafafa', borderRadius: '8px' }}>
+                                      <Row gutter={[16, 8]}>
+                                        <Col span={6}>
+                                          <div style={{ textAlign: 'center' }}>
+                                            <div style={{ fontSize: '12px', color: '#666', marginBottom: '4px' }}>Total Trades</div>
+                                            <div style={{ fontSize: '18px', fontWeight: 'bold' }}>{tradeCount}</div>
+                                          </div>
+                                        </Col>
+                                        <Col span={6}>
+                                          <div style={{ textAlign: 'center' }}>
+                                            <div style={{ fontSize: '12px', color: '#666', marginBottom: '4px' }}>Winning Trades</div>
+                                            <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#3f8600' }}>{winningTrades}</div>
+                                          </div>
+                                        </Col>
+                                        <Col span={6}>
+                                          <div style={{ textAlign: 'center' }}>
+                                            <div style={{ fontSize: '12px', color: '#666', marginBottom: '4px' }}>Losing Trades</div>
+                                            <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#cf1322' }}>{losingTrades}</div>
+                                          </div>
+                                        </Col>
+                                        <Col span={6}>
+                                          <div style={{ textAlign: 'center' }}>
+                                            <div style={{ fontSize: '12px', color: '#666', marginBottom: '4px' }}>Average PnL</div>
+                                            <div style={{ fontSize: '18px', fontWeight: 'bold', color: averagePnl >= 0 ? '#3f8600' : '#cf1322' }}>
+                                              {averagePnl >= 0 ? '+' : ''}${safeToFixed(averagePnl, 2)}
+                                            </div>
+                                          </div>
+                                        </Col>
+                                      </Row>
+                                    </div>
+                                    
+                                    {/* Trade Table - 使用模拟数据 */}
+                                    <Table
+                                      columns={[
+                                        {
+                                          title: 'Date',
+                                          dataIndex: 'date',
+                                          key: 'date',
+                                          width: 100,
+                                          sorter: (a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime(),
+                                          defaultSortOrder: 'descend',
+                                        },
+                                        {
+                                          title: 'Symbol',
+                                          dataIndex: 'symbol',
+                                          key: 'symbol',
+                                          width: 80,
+                                        },
+                                        {
+                                          title: 'Action',
+                                          dataIndex: 'action',
+                                          key: 'action',
+                                          width: 80,
+                                          render: (action: string) => (
+                                            <Tag color={action === 'BUY' ? 'green' : 'red'}>
+                                              {action}
+                                            </Tag>
+                                          ),
+                                        },
+                                        {
+                                          title: 'Price',
+                                          dataIndex: 'price',
+                                          key: 'price',
+                                          width: 80,
+                                          render: (price: number) => `$${safeToFixed(price, 2)}`,
+                                          align: 'right' as const,
+                                        },
+                                        {
+                                          title: 'Quantity',
+                                          dataIndex: 'quantity',
+                                          key: 'quantity',
+                                          width: 80,
+                                        },
+                                        {
+                                          title: 'P&L',
+                                          dataIndex: 'pnl',
+                                          key: 'pnl',
+                                          width: 100,
+                                          render: (pnl: number) => (
+                                            <span style={{ color: pnl >= 0 ? '#3f8600' : '#cf1322', fontWeight: 'bold' }}>
+                                              {pnl >= 0 ? '+' : ''}${safeToFixed(pnl, 2)}
+                                            </span>
+                                          ),
+                                          sorter: (a: any, b: any) => a.pnl - b.pnl,
+                                          align: 'right' as const,
+                                        },
+                                        {
+                                          title: 'Return',
+                                          dataIndex: 'return',
+                                          key: 'return',
+                                          width: 80,
+                                          render: (returnVal: number) => (
+                                            <span style={{ color: returnVal >= 0 ? '#3f8600' : '#cf1322', fontWeight: 'bold' }}>
+                                              {returnVal >= 0 ? '+' : ''}{safeToFixed(returnVal, 2)}%
+                                            </span>
+                                          ),
+                                          sorter: (a: any, b: any) => a.return - b.return,
+                                          align: 'right' as const,
+                                        },
+                                      ]}
+                                      dataSource={sortedTrades}
+                                      pagination={{ pageSize: 10 }}
+                                      size="small"
+                                      scroll={{ x: 600 }}
+                                    />
+                                    
+                                    {/* 后端真实数据提示 */}
+                                    <div style={{ marginTop: '16px', padding: '8px', background: '#f0f9ff', borderRadius: '4px', fontSize: '12px', color: '#666' }}>
+                                      <strong>数据说明：</strong> 
+                                      Trade list 目前使用前端模拟数据展示。后端返回了交易统计数据：总交易数 {tradeCount}，胜率 {safeToFixed(winRate, 1)}%，平均盈利 ${safeToFixed(avgWin, 2)}，平均亏损 ${safeToFixed(avgLoss, 2)}。
+                                    </div>
+                                  </>
+                                );
+                              })()}
+                            </>
+                          ) : (
+                            <Empty 
+                              description="No trade data available" 
+                              image={Empty.PRESENTED_IMAGE_SIMPLE}
+                              style={{ padding: '40px 0' }}
+                            />
+                          )}
+                        </>
                       ),
                     },
                     {
                       key: 'parameters',
                       label: 'Parameters',
                       children: (
-                        <div style={{ padding: '40px', textAlign: 'center', color: '#999' }}>
-                          Strategy parameters will be displayed here
+                        <div style={{ padding: '20px' }}>
+                          {backtestResult ? (
+                            <>
+                              {/* Strategy Information */}
+                              <Card 
+                                title="Strategy Information" 
+                                size="small" 
+                                style={{ marginBottom: '16px' }}
+                              >
+                                <Row gutter={[16, 8]}>
+                                  <Col span={12}>
+                                    <div><strong>Strategy Name:</strong> {
+                                      strategyOptions.find(opt => opt.value === backtestResult.parameters?.strategy)?.label || 
+                                      backtestResult.parameters?.strategy || 
+                                      'Unknown'
+                                    }</div>
+                                  </Col>
+                                  <Col span={12}>
+                                    <div><strong>Strategy Type:</strong> {
+                                      strategyOptions.find(opt => opt.value === backtestResult.parameters?.strategy)?.type === 'real' 
+                                        ? 'Real Calculation' 
+                                        : 'Simulated'
+                                    }</div>
+                                  </Col>
+                                </Row>
+                              </Card>
+                              
+                              {/* Market Information */}
+                              <Card 
+                                title="Market Information" 
+                                size="small" 
+                                style={{ marginBottom: '16px' }}
+                              >
+                                <Row gutter={[16, 8]}>
+                                  <Col span={12}>
+                                    <div><strong>Symbol:</strong> {backtestResult.parameters?.symbols?.[0] || 'Unknown'}</div>
+                                  </Col>
+                                  <Col span={12}>
+                                    <div><strong>Start Date:</strong> {backtestResult.parameters?.startDate || 'Unknown'}</div>
+                                  </Col>
+                                  <Col span={12}>
+                                    <div><strong>End Date:</strong> {backtestResult.parameters?.endDate || 'Unknown'}</div>
+                                  </Col>
+                                  <Col span={12}>
+                                    <div><strong>Period:</strong> {backtestResult.parameters?.period || 'Unknown'}</div>
+                                  </Col>
+                                </Row>
+                              </Card>
+                              
+                              {/* Capital Information */}
+                              <Card 
+                                title="Capital Information" 
+                                size="small" 
+                                style={{ marginBottom: '16px' }}
+                              >
+                                <Row gutter={[16, 8]}>
+                                  <Col span={24}>
+                                    <div><strong>Initial Capital:</strong> ${safeNumber(backtestResult.parameters?.initialCapital).toLocaleString()}</div>
+                                  </Col>
+                                </Row>
+                              </Card>
+                              
+                              {/* Strategy Parameters */}
+                              <Card 
+                                title="Strategy Parameters" 
+                                size="small"
+                              >
+                                {backtestResult.parameters?.strategy === 'moving_average' && (
+                                  <Row gutter={[16, 8]}>
+                                    <Col span={12}>
+                                      <div><strong>Short MA Period:</strong> {backtestResult.parameters?.shortMaPeriod || 20}</div>
+                                    </Col>
+                                    <Col span={12}>
+                                      <div><strong>Long MA Period:</strong> {backtestResult.parameters?.longMaPeriod || 50}</div>
+                                    </Col>
+                                  </Row>
+                                )}
+                                
+                                {backtestResult.parameters?.strategy === 'rsi' && (
+                                  <Row gutter={[16, 8]}>
+                                    <Col span={12}>
+                                      <div><strong>RSI Period:</strong> {backtestResult.parameters?.rsiPeriod || 14}</div>
+                                    </Col>
+                                    <Col span={12}>
+                                      <div><strong>Oversold Level:</strong> {backtestResult.parameters?.rsiOversold || 30}</div>
+                                    </Col>
+                                    <Col span={12}>
+                                      <div><strong>Overbought Level:</strong> {backtestResult.parameters?.rsiOverbought || 70}</div>
+                                    </Col>
+                                  </Row>
+                                )}
+                                
+                                {backtestResult.parameters?.strategy === 'macd' && (
+                                  <Row gutter={[16, 8]}>
+                                    <Col span={12}>
+                                      <div><strong>Fast Period:</strong> {backtestResult.parameters?.macdFast || 12}</div>
+                                    </Col>
+                                    <Col span={12}>
+                                      <div><strong>Slow Period:</strong> {backtestResult.parameters?.macdSlow || 26}</div>
+                                    </Col>
+                                    <Col span={12}>
+                                      <div><strong>Signal Period:</strong> {backtestResult.parameters?.macdSignal || 9}</div>
+                                    </Col>
+                                  </Row>
+                                )}
+                                
+                                {!['moving_average', 'rsi', 'macd'].includes(backtestResult.parameters?.strategy || '') && (
+                                  <div style={{ textAlign: 'center', padding: '20px', color: '#999' }}>
+                                    No specific parameters for this strategy
+                                  </div>
+                                )}
+                              </Card>
+                            </>
+                          ) : (
+                            <div style={{ textAlign: 'center', padding: '40px', color: '#999' }}>
+                              Run a backtest to see parameters
+                            </div>
+                          )}
                         </div>
                       ),
                     },

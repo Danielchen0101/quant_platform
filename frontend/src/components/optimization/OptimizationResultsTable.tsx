@@ -9,6 +9,9 @@ interface OptimizationResultsTableProps {
 const OptimizationResultsTable: React.FC<OptimizationResultsTableProps> = ({ results }) => {
   // Helper function to format percentages
   const formatPercent = (value: number): string => {
+    if (value === undefined || value === null || isNaN(value)) {
+      return 'N/A';
+    }
     const sign = value >= 0 ? '+' : '';
     return `${sign}${value.toFixed(2)}%`;
   };
@@ -95,7 +98,7 @@ const OptimizationResultsTable: React.FC<OptimizationResultsTableProps> = ({ res
         const color = value >= 1 ? '#3f8600' : value >= 0 ? '#fa8c16' : '#cf1322';
         return (
           <span style={{ color, fontWeight: 'bold' }}>
-            {value.toFixed(2)}
+            {value !== undefined && value !== null && !isNaN(value) ? value.toFixed(2) : 'N/A'}
           </span>
         );
       },
@@ -115,7 +118,7 @@ const OptimizationResultsTable: React.FC<OptimizationResultsTableProps> = ({ res
         }
         return (
           <span style={{ color, fontWeight: 'bold' }}>
-            {value.toFixed(1)}%
+            {value !== undefined && value !== null && !isNaN(value) ? value.toFixed(1) + '%' : 'N/A'}
           </span>
         );
       },

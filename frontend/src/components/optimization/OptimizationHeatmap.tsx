@@ -68,6 +68,9 @@ const OptimizationHeatmap: React.FC<OptimizationHeatmapProps> = ({ results }) =>
 
   // Helper function to format percentages
   const formatPercent = (value: number): string => {
+    if (value === undefined || value === null || isNaN(value)) {
+      return 'N/A';
+    }
     const sign = value >= 0 ? '+' : '';
     return `${sign}${value.toFixed(2)}%`;
   };
@@ -138,45 +141,80 @@ const OptimizationHeatmap: React.FC<OptimizationHeatmapProps> = ({ results }) =>
               <Tooltip
                 key={`cell-${shortVal}-${longVal}`}
                 title={hasResult ? (
-                  <div style={{ fontSize: '13px', color: '#000', padding: '4px 0' }}>
-                    <div style={{ marginBottom: '6px', fontWeight: '600', fontSize: '14px' }}>
-                      Short MA: {shortVal}, Long MA: {longVal}
+                  <div style={{ fontSize: '13px', color: '#000', padding: '4px 0', minWidth: '220px' }}>
+                    <div style={{ marginBottom: '8px', fontWeight: '600', fontSize: '14px', color: '#1890ff', borderBottom: '1px solid #f0f0f0', paddingBottom: '4px' }}>
+                      MA Pair: {shortVal} / {longVal}
                     </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                      <div>
-                        <div style={{ fontSize: '11px', color: '#666' }}>Sharpe</div>
-                        <div style={{ color: sharpe >= 0 ? '#52c41a' : '#ff4d4f', fontWeight: '600' }}>
-                          {sharpe.toFixed(2)}
-                        </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: '12px', color: '#666' }}>Sharpe Ratio:</span>
+                        <span style={{ 
+                          color: sharpe >= 0 ? '#3f8600' : '#cf1322', 
+                          fontWeight: '600',
+                          fontSize: '13px'
+                        }}>
+                          {sharpe !== undefined && sharpe !== null && !isNaN(sharpe) ? sharpe.toFixed(2) : 'N/A'}
+                        </span>
                       </div>
-                      <div>
-                        <div style={{ fontSize: '11px', color: '#666' }}>Return</div>
-                        <div style={{ color: result.totalReturn >= 0 ? '#52c41a' : '#ff4d4f', fontWeight: '600' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: '12px', color: '#666' }}>Total Return:</span>
+                        <span style={{ 
+                          color: result.totalReturn >= 0 ? '#3f8600' : '#cf1322', 
+                          fontWeight: '600',
+                          fontSize: '13px'
+                        }}>
                           {formatPercent(result.totalReturn)}
-                        </div>
+                        </span>
                       </div>
-                      <div>
-                        <div style={{ fontSize: '11px', color: '#666' }}>Max DD</div>
-                        <div style={{ color: '#ff4d4f', fontWeight: '600' }}>
-                          {result.maxDrawdown.toFixed(2)}%
-                        </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: '12px', color: '#666' }}>Max Drawdown:</span>
+                        <span style={{ 
+                          color: '#cf1322', 
+                          fontWeight: '600',
+                          fontSize: '13px'
+                        }}>
+                          {result.maxDrawdown !== undefined && result.maxDrawdown !== null && !isNaN(result.maxDrawdown) ? result.maxDrawdown.toFixed(2) + '%' : 'N/A'}
+                        </span>
                       </div>
-                      <div>
-                        <div style={{ fontSize: '11px', color: '#666' }}>Trades</div>
-                        <div style={{ fontWeight: '600' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: '12px', color: '#666' }}>Trades:</span>
+                        <span style={{ 
+                          fontWeight: '600',
+                          fontSize: '13px',
+                          color: '#1890ff'
+                        }}>
                           {result.trades}
-                        </div>
+                        </span>
                       </div>
+                      {result.winRate !== undefined && result.winRate !== null && !isNaN(result.winRate) && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ fontSize: '12px', color: '#666' }}>Win Rate:</span>
+                          <span style={{ 
+                            color: result.winRate >= 60 ? '#3f8600' : result.winRate >= 40 ? '#fa8c16' : '#cf1322',
+                            fontWeight: '600',
+                            fontSize: '13px'
+                          }}>
+                            {result.winRate.toFixed(1)}%
+                          </span>
+                        </div>
+                      )}
                     </div>
                   </div>
                 ) : (
-                  <div style={{ color: '#000', fontSize: '13px' }}>
-                    No data for Short MA={shortVal}, Long MA={longVal}
+                  <div style={{ color: '#000', fontSize: '13px', padding: '8px' }}>
+                    <div style={{ fontWeight: '600', marginBottom: '4px' }}>No Data</div>
+                    <div style={{ fontSize: '12px', color: '#666' }}>
+                      Short MA: {shortVal}, Long MA: {longVal}
+                    </div>
                   </div>
                 )}
                 placement="top"
                 color="white"
-                overlayStyle={{ maxWidth: '280px' }}
+                overlayStyle={{ 
+                  maxWidth: '260px',
+                  boxShadow: '0 3px 6px -4px rgba(0, 0, 0, 0.12), 0 6px 16px 0 rgba(0, 0, 0, 0.08), 0 9px 28px 8px rgba(0, 0, 0, 0.05)',
+                  borderRadius: '6px'
+                }}
               >
                 <div
                   style={{
@@ -214,7 +252,7 @@ const OptimizationHeatmap: React.FC<OptimizationHeatmapProps> = ({ results }) =>
                       fontWeight: 'bold',
                       fontSize: '9px'
                     }}>
-                      {sharpe.toFixed(1)}
+                      {sharpe !== undefined && sharpe !== null && !isNaN(sharpe) ? sharpe.toFixed(1) : 'N/A'}
                     </span>
                   )}
                 </div>
@@ -237,7 +275,7 @@ const OptimizationHeatmap: React.FC<OptimizationHeatmapProps> = ({ results }) =>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '10px' }}>
           <div style={{ display: 'flex', alignItems: 'center' }}>
             <div style={{ width: '12px', height: '12px', background: 'rgb(255, 0, 0)', marginRight: '4px' }}></div>
-            <span>Low ({minSharpe.toFixed(2)})</span>
+            <span>Low ({minSharpe !== undefined && minSharpe !== null && !isNaN(minSharpe) ? minSharpe.toFixed(2) : 'N/A'})</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center' }}>
             <div style={{ width: '12px', height: '12px', background: 'rgb(255, 255, 0)', marginRight: '4px' }}></div>
@@ -245,7 +283,7 @@ const OptimizationHeatmap: React.FC<OptimizationHeatmapProps> = ({ results }) =>
           </div>
           <div style={{ display: 'flex', alignItems: 'center' }}>
             <div style={{ width: '12px', height: '12px', background: 'rgb(0, 255, 0)', marginRight: '4px' }}></div>
-            <span>High ({maxSharpe.toFixed(2)})</span>
+            <span>High ({maxSharpe !== undefined && maxSharpe !== null && !isNaN(maxSharpe) ? maxSharpe.toFixed(2) : 'N/A'})</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center' }}>
             <div style={{ width: '12px', height: '12px', background: '#f5f5f5', border: '1px solid #e8e8e8', marginRight: '4px' }}></div>

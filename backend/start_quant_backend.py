@@ -1043,7 +1043,8 @@ def run_parameter_optimization():
                 if short_ma < long_ma:  # Only keep valid combinations where short MA < long MA
                     valid_combinations.append((short_ma, long_ma))
         
-        # Check total valid combinations (limit to 50)
+        # Check total valid combinations (limit increased from 50 to 1500)
+        MAX_COMBINATIONS = 1500
         total_valid_combinations = len(valid_combinations)
         if total_valid_combinations == 0:
             return jsonify({
@@ -1052,10 +1053,10 @@ def run_parameter_optimization():
                 "totalCombinations": 0
             }), 400
         
-        if total_valid_combinations > 50:
+        if total_valid_combinations > MAX_COMBINATIONS:
             return jsonify({
                 "success": False, 
-                "error": f"Too many valid parameter combinations: {total_valid_combinations}. Maximum is 50.",
+                "error": f"Too many valid parameter combinations: {total_valid_combinations}. Maximum is {MAX_COMBINATIONS}.",
                 "totalCombinations": total_valid_combinations
             }), 400
         
