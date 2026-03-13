@@ -3,6 +3,7 @@ import { Card, Row, Col, Statistic, Table, Tag, Progress, Alert, Button, Space, 
 import { ArrowUpOutlined, ArrowDownOutlined, LineChartOutlined, PlayCircleOutlined, EyeOutlined, ReloadOutlined, ExclamationCircleOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { systemAPI, marketAPI, backtraderAPI } from '../services/api';
+import { useLanguage } from '../contexts/LanguageContext';
 
 interface Stock {
   symbol: string;
@@ -54,6 +55,8 @@ interface BacktestHistoryItem {
 }
 
 const Dashboard: React.FC = () => {
+  const { t } = useLanguage();
+  
   // 独立的状态管理 - 系统状态
   const [systemData, setSystemData] = useState<SystemStatus | null>(null);
   const [systemLoading, setSystemLoading] = useState(true);
@@ -341,8 +344,11 @@ const Dashboard: React.FC = () => {
   return (
     <div>
       <h1 style={{ marginBottom: 24 }}>
-        <LineChartOutlined /> Dashboard
+        <LineChartOutlined /> {t.dashboard.title}
       </h1>
+      <div style={{ color: '#666', fontSize: '14px', marginBottom: '24px' }}>
+        {t.dashboard.subtitle}
+      </div>
 
       {/* 系统状态模块 */}
       <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>

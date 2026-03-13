@@ -142,6 +142,40 @@ def calculate_backtest_metrics(hist_data, initial_capital):
     print(f"DEBUG: Strategy_Returns exists: {'Strategy_Returns' in hist_data.columns}")
     print(f"DEBUG: Signal exists: {'Signal' in hist_data.columns}")
     
+    # Calculate Buy & Hold Return (Benchmark) and generate equity series
+    buy_hold_return = 0.0
+    buy_hold_equity_series = []
+    monthly_returns = []  # New: Monthly returns for heatmap
+    if 'Close' in hist_data.columns and len(hist_data) > 0:
+        try:
+            initial_price = float(hist_data['Close'].iloc[0])
+            final_price = float(hist_data['Close'].iloc[-1])
+            if initial_price > 0:
+                buy_hold_return = ((final_price - initial_price) / initial_price) * 100
+                buy_hold_return = round(buy_hold_return, 2)
+                
+                # Generate Buy & Hold equity series
+                print(f"DEBUG: Generating buy_hold_equity_series for {len(hist_data)} data points")
+                for idx in range(len(hist_data)):
+                    current_price = float(hist_data['Close'].iloc[idx])
+                    buy_hold_equity = initial_capital * (current_price / initial_price)
+                    
+                    # Get date from hist_data index
+                    date_obj = hist_data.index[idx]
+                    if hasattr(date_obj, 'strftime'):
+                        date_str = date_obj.strftime('%Y-%m-%d')
+                    else:
+                        date_str = str(date_obj)
+                    
+                    buy_hold_equity_series.append({
+                        "date": date_str,
+                        "equity": round(buy_hold_equity, 2)
+                    })
+                print(f"DEBUG: Generated {len(buy_hold_equity_series)} buy_hold_equity data points")
+        except Exception as e:
+            print(f"DEBUG: Error calculating buy_hold_return or equity series: {e}")
+            buy_hold_return = 0.0
+    
     # CRITICAL FIX: Check for abnormal returns that could cause 30000% errors
     if 'Strategy_Returns' in hist_data.columns:
         # Check for extreme daily returns (>100% or <-50% which are unrealistic for stocks)
@@ -359,6 +393,78 @@ def calculate_backtest_metrics(hist_data, initial_capital):
             print(f"DEBUG: equity_curve first date: {equity_curve[0]['date']}, equity: {equity_curve[0]['equity']}")
             print(f"DEBUG: equity_curve last date: {equity_curve[-1]['date']}, equity: {equity_curve[-1]['equity']}")
     
+    # Generate trades list with detailed information
+    trades_list_detailed = []
+    if len(trades_list) > 0 and len(hist_data) > 0:
+        for trade in trades_list:
+            try:
+                # Get entry and exit indices
+                entry_idx = trade['entry_idx']
+                exit_idx = trade['exit_idx']
+                
+                # Ensure indices are within bounds
+                if entry_idx >= len(hist_data) or exit_idx >= len(hist_data):
+                    print(f"DEBUG: Trade index out of bounds: entry_idx={entry_idx}, exit_idx={exit_idx}, hist_data_len={len(hist_data)}")
+                    continue
+                
+                # Get entry and exit dates
+                entry_date = hist_data.index[entry_idx]
+                exit_date = hist_data.index[exit_idx]
+                
+                # Format dates
+                if hasattr(entry_date, 'strftime'):
+                    entry_date_str = entry_date.strftime('%Y-%m-%d')
+                else:
+                    entry_date_str = str(entry_date)
+                
+                if hasattr(exit_date, 'strftime'):
+                    exit_date_str = exit_date.strftime('%Y-%m-%d')
+                else:
+                    exit_date_str = str(exit_date)
+                
+                # Get entry and exit prices (use Close price)
+                entry_price = 0
+                exit_price = 0
+                if 'Close' in hist_data.columns:
+                    entry_price_val = hist_data['Close'].iloc[entry_idx]
+                    exit_price_val = hist_data['Close'].iloc[exit_idx]
+                    
+                    if not pd.isna(entry_price_val):
+                        entry_price = round(float(entry_price_val), 2)
+                    if not pd.isna(exit_price_val):
+                        exit_price = round(float(exit_price_val), 2)
+                
+                # Calculate holding days
+                holding_days = exit_idx - entry_idx + 1
+                
+                # Calculate PnL (Profit and Loss)
+                pnl = 0
+                if entry_price > 0:  # Avoid division by zero
+                    # For long positions (position=1): PnL = (exit_price - entry_price) * (initial_capital / entry_price)
+                    # For short positions (position=-1): PnL = (entry_price - exit_price) * (initial_capital / entry_price)
+                    position_multiplier = trade['position']
+                    price_change = exit_price - entry_price
+                    pnl = price_change * (initial_capital / entry_price) * position_multiplier
+                
+                # Get return percentage (already calculated in trade['return'])
+                return_pct = trade['return'] if trade['return'] is not None else 0
+                
+                trades_list_detailed.append({
+                    "entryDate": entry_date_str,
+                    "exitDate": exit_date_str,
+                    "entryPrice": float(entry_price),  # 确保是 float 类型
+                    "exitPrice": float(exit_price),    # 确保是 float 类型
+                    "pnl": float(round(pnl, 2)),       # 确保是 float 类型
+                    "returnPct": float(round(return_pct, 2)),  # 确保是 float 类型
+                    "holdingDays": int(holding_days),  # 确保是 int 类型
+                    "position": int(trade['position'])  # 确保是 int 类型
+                })
+                
+            except Exception as e:
+                print(f"DEBUG: Error processing trade: {e}")
+                # Skip this trade but continue processing others
+                continue
+    
     # Generate chart data (minimal version for phase 2)
     chart_data = []
     
@@ -389,9 +495,16 @@ def calculate_backtest_metrics(hist_data, initial_capital):
             # Get basic price data
             close_price = round(float(hist_data['Close'].iloc[idx]), 2) if 'Close' in hist_data.columns else 0
             
+            # Get volume data if available
+            volume_value = 0
+            if 'Volume' in hist_data.columns:
+                volume = hist_data['Volume'].iloc[idx]
+                volume_value = int(volume) if not pd.isna(volume) else 0
+            
             chart_item = {
                 "date": time_str,
                 "close": close_price,
+                "volume": volume_value,  # Add volume field for volume chart
                 "signal": 0  # Default no signal (will be set below)
             }
             
@@ -435,6 +548,96 @@ def calculate_backtest_metrics(hist_data, initial_capital):
             
             chart_data.append(chart_item)
     
+    # Calculate monthly returns for heatmap (after equity curve is generated)
+    # Use equity curve data to ensure consistency with displayed equity values
+    if len(equity_curve) > 0:
+        try:
+            print(f"DEBUG: Calculating monthly returns from equity curve for heatmap")
+            
+            # Create a DataFrame from equity curve for easier processing
+            equity_df = pd.DataFrame(equity_curve)
+            equity_df['Date'] = pd.to_datetime(equity_df['date'])
+            equity_df['Year'] = equity_df['Date'].dt.year
+            equity_df['Month'] = equity_df['Date'].dt.month
+            
+            # Group by year and month
+            monthly_groups = equity_df.groupby(['Year', 'Month'])
+            
+            for (year, month), group in monthly_groups:
+                if len(group) > 0:
+                    # Sort by date within the month
+                    group_sorted = group.sort_values('Date')
+                    
+                    # Get first and last equity values of the month
+                    first_equity = group_sorted['equity'].iloc[0]
+                    last_equity = group_sorted['equity'].iloc[-1]
+                    
+                    # Calculate monthly return: (last_equity / first_equity - 1) * 100
+                    if first_equity > 0:
+                        monthly_return_pct = (last_equity / first_equity - 1) * 100
+                    else:
+                        monthly_return_pct = 0.0
+                    
+                    # Format month name
+                    month_names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 
+                                  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+                    month_name = month_names[month - 1] if 1 <= month <= 12 else f'M{month}'
+                    
+                    monthly_returns.append({
+                        "year": int(year),
+                        "month": int(month),
+                        "monthName": month_name,
+                        "return": round(float(monthly_return_pct), 2)
+                    })
+                    
+                    # Debug print for first few months
+                    if len(monthly_returns) <= 3:
+                        print(f"DEBUG: Month {month_name} {year}: first_equity={first_equity}, last_equity={last_equity}, return={monthly_return_pct:.2f}%")
+            
+            print(f"DEBUG: Generated {len(monthly_returns)} monthly return records from equity curve")
+            
+        except Exception as e:
+            print(f"DEBUG: Error calculating monthly returns from equity curve: {e}")
+            monthly_returns = []
+    
+    # Calculate rolling Sharpe ratio (30-day window)
+    rolling_sharpe_ratio = []
+    if 'Strategy_Returns' in hist_data.columns and len(hist_data) > 30:
+        try:
+            print(f"DEBUG: Calculating 30-day rolling Sharpe ratio")
+            rolling_window = 30
+            annualization_factor = (252 ** 0.5)  # sqrt(252) for annualization
+            
+            for i in range(rolling_window, len(hist_data)):
+                # Get returns for the rolling window
+                window_returns = hist_data['Strategy_Returns'].iloc[i-rolling_window:i]
+                
+                # Calculate Sharpe ratio (mean / std * sqrt(252))
+                if len(window_returns) > 1 and window_returns.std() > 0:
+                    sharpe_value = (window_returns.mean() / window_returns.std()) * annualization_factor
+                else:
+                    sharpe_value = 0.0
+                
+                # Get date for this data point
+                date_obj = hist_data.index[i]
+                if hasattr(date_obj, 'strftime'):
+                    date_str = date_obj.strftime('%Y-%m-%d')
+                else:
+                    date_str = str(date_obj)
+                
+                rolling_sharpe_ratio.append({
+                    "date": date_str,
+                    "sharpe": round(float(sharpe_value), 3)  # 3 decimal places for Sharpe ratio
+                })
+            
+            print(f"DEBUG: Generated {len(rolling_sharpe_ratio)} rolling Sharpe ratio data points")
+            
+        except Exception as e:
+            print(f"DEBUG: Error calculating rolling Sharpe ratio: {e}")
+            rolling_sharpe_ratio = []
+    else:
+        print(f"DEBUG: Not enough data for rolling Sharpe ratio calculation. Data points: {len(hist_data) if 'Strategy_Returns' in hist_data.columns else 0}")
+    
     result = {
         "totalReturn": round(total_return_pct, 2),
         "annualizedReturn": round(annualized_return, 2),
@@ -457,7 +660,13 @@ def calculate_backtest_metrics(hist_data, initial_capital):
         "exposure": round(exposure, 1),  # 持仓时间占比 (%)
         "equityCurve": equity_curve,
         # 图表数据（Phase 2 最小实现）
-        "chartData": chart_data
+        "chartData": chart_data,
+        # 交易列表（新增）
+        "tradesList": trades_list_detailed,
+        "buyHoldReturn": buy_hold_return,
+        "buyHoldEquitySeries": buy_hold_equity_series,
+        "monthlyReturns": monthly_returns,
+        "rollingSharpeRatio": rolling_sharpe_ratio
     }
     print(f"DEBUG: calculate_backtest_metrics returning result with keys: {list(result.keys())}")
     # 关键指标调试输出，用于检测30000%异常结果
@@ -587,9 +796,14 @@ def run_real_backtest(symbol, strategy, start_date, end_date, initial_capital):
 @app.route('/api/backtest/run', methods=['POST'])
 def run_backtest():
     """Run backtest with real or simulated data"""
-    sys.stderr.write(f"\n=== RUN_BACKTEST CALLED ===\n")
-    sys.stderr.write(f"Request data: {request.get_json()}\n")
-    sys.stderr.flush()
+    try:
+        print(f"\n=== RUN_BACKTEST CALLED ===")
+        request_data = request.get_json()
+        print(f"Request data: {request_data}")
+    except Exception as e:
+        print(f"Error logging request: {e}")
+    
+    data = request.get_json()
     
     data = request.get_json()
     
@@ -599,8 +813,7 @@ def run_backtest():
     end_date = data.get('endDate', '2024-01-01')
     initial_capital = data.get('initialCapital', 100000)
     
-    sys.stderr.write(f"Symbol: {symbol}, Strategy: {strategy}, Start: {start_date}, End: {end_date}, Capital: {initial_capital}\n")
-    sys.stderr.flush()
+    print(f"Symbol: {symbol}, Strategy: {strategy}, Start: {start_date}, End: {end_date}, Capital: {initial_capital}")
     
     # Generate backtest ID
     backtest_id = f"bt_{int(time.time())}_{symbol}"
@@ -664,6 +877,40 @@ def run_backtest():
                 date = (datetime.now() - timedelta(days=date_days_ago)).strftime('%Y-%m-%d')
                 equity_curve.append({"date": date, "equity": round(equity, 2)})
             
+            # Generate Buy & Hold equity series
+            buy_hold_equity_series = []
+            print(f"DEBUG: Generating buy_hold_equity_series")
+            print(f"DEBUG: hist_data columns: {list(hist_data.columns)}")
+            print(f"DEBUG: hist_data length: {len(hist_data)}")
+            
+            if 'Close' in hist_data.columns and len(hist_data) > 0:
+                print(f"DEBUG: 'Close' column found, generating series")
+                initial_price = float(hist_data['Close'].iloc[0])
+                print(f"DEBUG: initial_price: {initial_price}")
+                
+                if initial_price > 0:
+                    print(f"DEBUG: Generating {len(hist_data)} data points")
+                    for idx in range(len(hist_data)):
+                        current_price = float(hist_data['Close'].iloc[idx])
+                        buy_hold_equity = initial_capital * (current_price / initial_price)
+                        
+                        # Get date from hist_data index
+                        date_obj = hist_data.index[idx]
+                        if hasattr(date_obj, 'strftime'):
+                            date_str = date_obj.strftime('%Y-%m-%d')
+                        else:
+                            date_str = str(date_obj)
+                        
+                        buy_hold_equity_series.append({
+                            "date": date_str,
+                            "equity": round(buy_hold_equity, 2)
+                        })
+                    print(f"DEBUG: Generated {len(buy_hold_equity_series)} buy_hold_equity data points")
+                else:
+                    print(f"DEBUG: initial_price is zero or negative: {initial_price}")
+            else:
+                print(f"DEBUG: No 'Close' column or hist_data is empty")
+            
             results = {
                 "totalReturn": total_return,
                 "annualizedReturn": annualized_return,
@@ -674,7 +921,9 @@ def run_backtest():
                 "winRate": win_rate,
                 "trades": trades,
                 "avgReturnPerTrade": avg_return_per_trade,
-                "equityCurve": equity_curve
+                "equityCurve": equity_curve,
+                "buyHoldReturn": buy_hold_return,
+                "buyHoldEquitySeries": buy_hold_equity_series
             }
         else:
             # Unknown strategy type
@@ -686,15 +935,15 @@ def run_backtest():
             }), 400
     else:
         # run_real_backtest returned results
-        # Ensure results has all 10 fields (in case run_real_backtest returns incomplete results)
+        # Ensure results has all required fields (in case run_real_backtest returns incomplete results)
         required_fields = ["totalReturn", "annualizedReturn", "profitLoss", "sharpeRatio", 
                           "calmarRatio", "maxDrawdown", "winRate", "trades", 
-                          "avgReturnPerTrade", "equityCurve"]
+                          "avgReturnPerTrade", "equityCurve", "buyHoldReturn", "buyHoldEquitySeries", "monthlyReturns", "rollingSharpeRatio"]
         for field in required_fields:
             if field not in results:
                 sys.stderr.write(f"WARNING: Missing field {field} in results, adding default\n")
                 sys.stderr.flush()
-                if field == "equityCurve":
+                if field == "equityCurve" or field == "buyHoldEquitySeries" or field == "monthlyReturns" or field == "rollingSharpeRatio":
                     results[field] = []
                 else:
                     results[field] = 0
@@ -727,6 +976,195 @@ def run_backtest():
         },
         "createdAt": datetime.now().isoformat()
     })
+
+@app.route('/api/backtest/optimize', methods=['POST'])
+def run_parameter_optimization():
+    """
+    Run parameter optimization for moving average strategy
+    """
+    try:
+        data = request.json
+        if not data:
+            return jsonify({"success": False, "error": "No JSON data received"}), 400
+        
+        symbol = data.get('symbol', 'AAPL')
+        strategy = data.get('strategy', 'moving_average')
+        start_date = data.get('startDate', '2024-01-01')
+        end_date = data.get('endDate', '2024-12-31')
+        initial_capital = data.get('initialCapital', 10000)
+        parameters = data.get('parameters', {})
+        
+        # Validate strategy
+        if strategy != 'moving_average':
+            return jsonify({"success": False, "error": "Only moving_average strategy is supported for optimization"}), 400
+        
+        # Validate parameters structure
+        if not parameters or 'short_ma' not in parameters or 'long_ma' not in parameters:
+            return jsonify({"success": False, "error": "Parameters must include short_ma and long_ma ranges"}), 400
+        
+        short_params = parameters['short_ma']
+        long_params = parameters['long_ma']
+        
+        # Validate parameter ranges
+        required_fields = ['min', 'max', 'step']
+        for field in required_fields:
+            if field not in short_params or field not in long_params:
+                return jsonify({"success": False, "error": f"Both short_ma and long_ma must have {field} field"}), 400
+        
+        # Extract values
+        short_min = int(short_params['min'])
+        short_max = int(short_params['max'])
+        short_step = int(short_params['step'])
+        long_min = int(long_params['min'])
+        long_max = int(long_params['max'])
+        long_step = int(long_params['step'])
+        
+        # Validate parameter values
+        if short_min <= 0 or short_max <= 0 or short_step <= 0:
+            return jsonify({"success": False, "error": "short_ma values must be positive"}), 400
+        
+        if long_min <= 0 or long_max <= 0 or long_step <= 0:
+            return jsonify({"success": False, "error": "long_ma values must be positive"}), 400
+        
+        if short_min >= short_max:
+            return jsonify({"success": False, "error": "short_ma min must be less than max"}), 400
+        
+        if long_min >= long_max:
+            return jsonify({"success": False, "error": "long_ma min must be less than max"}), 400
+        
+        # Generate parameter ranges
+        short_mas = list(range(short_min, short_max + 1, short_step))
+        long_mas = list(range(long_min, long_max + 1, long_step))
+        
+        # Generate all possible combinations and filter out invalid ones (short_ma >= long_ma)
+        valid_combinations = []
+        for short_ma in short_mas:
+            for long_ma in long_mas:
+                if short_ma < long_ma:  # Only keep valid combinations where short MA < long MA
+                    valid_combinations.append((short_ma, long_ma))
+        
+        # Check total valid combinations (limit to 50)
+        total_valid_combinations = len(valid_combinations)
+        if total_valid_combinations == 0:
+            return jsonify({
+                "success": False, 
+                "error": "No valid parameter combinations found. Ensure short_ma values are less than long_ma values.",
+                "totalCombinations": 0
+            }), 400
+        
+        if total_valid_combinations > 50:
+            return jsonify({
+                "success": False, 
+                "error": f"Too many valid parameter combinations: {total_valid_combinations}. Maximum is 50.",
+                "totalCombinations": total_valid_combinations
+            }), 400
+        
+        print(f"DEBUG: Found {total_valid_combinations} valid combinations out of {len(short_mas) * len(long_mas)} total possible")
+        
+        print(f"DEBUG: Starting optimization with {total_valid_combinations} valid combinations")
+        print(f"DEBUG: short_mas: {short_mas}")
+        print(f"DEBUG: long_mas: {long_mas}")
+        
+        # Fetch historical data using yfinance (same as run_real_backtest)
+        try:
+            import yfinance as yf
+            stock = yf.Ticker(symbol)
+            hist_data = stock.history(start=start_date, end=end_date)
+            
+            if hist_data.empty:
+                return jsonify({"success": False, "error": f"Failed to fetch data for {symbol}"}), 400
+            
+        except Exception as e:
+            return jsonify({"success": False, "error": f"Data fetch error: {str(e)}"}), 400
+        
+        optimization_results = []
+        
+        # Run optimization for all valid parameter combinations
+        for short_ma, long_ma in valid_combinations:
+            try:
+                print(f"DEBUG: Running backtest with short_ma={short_ma}, long_ma={long_ma}")
+                
+                # Generate signals for this parameter combination
+                hist_data_copy = hist_data.copy()
+                hist_data_copy[f'SMA_{short_ma}'] = hist_data_copy['Close'].rolling(window=short_ma).mean()
+                hist_data_copy[f'SMA_{long_ma}'] = hist_data_copy['Close'].rolling(window=long_ma).mean()
+                hist_data_copy['Signal'] = 0
+                hist_data_copy.loc[hist_data_copy[f'SMA_{short_ma}'] > hist_data_copy[f'SMA_{long_ma}'], 'Signal'] = 1
+                hist_data_copy.loc[hist_data_copy[f'SMA_{short_ma}'] < hist_data_copy[f'SMA_{long_ma}'], 'Signal'] = -1
+                hist_data_copy['Returns'] = hist_data_copy['Close'].pct_change()
+                hist_data_copy['Strategy_Returns'] = hist_data_copy['Signal'].shift(1) * hist_data_copy['Returns']
+                
+                # Calculate metrics for this parameter combination
+                results = calculate_backtest_metrics(hist_data_copy, initial_capital)
+                
+                optimization_results.append({
+                    "short_ma": short_ma,
+                    "long_ma": long_ma,
+                    "totalReturn": results.get("totalReturn", 0),
+                    "annualizedReturn": results.get("annualizedReturn", 0),
+                    "sharpeRatio": results.get("sharpeRatio", 0),
+                    "maxDrawdown": results.get("maxDrawdown", 0),
+                    "trades": results.get("trades", 0),
+                    "winRate": results.get("winRate", 0),
+                    "profitLoss": results.get("profitLoss", 0),
+                    "volatility": results.get("volatility", 0),
+                    "sortinoRatio": results.get("sortinoRatio", 0),
+                    "profitFactor": results.get("profitFactor", 0),
+                    "expectancy": results.get("expectancy", 0),
+                    "exposure": results.get("exposure", 0)
+                })
+                
+            except Exception as e:
+                print(f"Error optimizing parameters short_ma={short_ma}, long_ma={long_ma}: {str(e)}")
+                # Continue with other combinations
+        
+        if not optimization_results:
+            return jsonify({"success": False, "error": "No valid optimization results generated"}), 400
+        
+        # Sort by Sharpe Ratio (descending) - main optimization criterion
+        optimization_results.sort(key=lambda x: x["sharpeRatio"], reverse=True)
+        
+        # Find best combination (already first after sorting by sharpeRatio)
+        best_combination = optimization_results[0] if optimization_results else {}
+        
+        # Calculate summary statistics
+        if optimization_results:
+            sharpe_ratios = [r["sharpeRatio"] for r in optimization_results]
+            total_returns = [r["totalReturn"] for r in optimization_results]
+            max_drawdowns = [r["maxDrawdown"] for r in optimization_results]
+            
+            summary = {
+                "bestSharpe": max(sharpe_ratios) if sharpe_ratios else 0,
+                "bestReturn": max(total_returns) if total_returns else 0,
+                "lowestDrawdown": min(max_drawdowns) if max_drawdowns else 0,
+                "averageSharpe": sum(sharpe_ratios) / len(sharpe_ratios) if sharpe_ratios else 0
+            }
+        else:
+            summary = {
+                "bestSharpe": 0,
+                "bestReturn": 0,
+                "lowestDrawdown": 0,
+                "averageSharpe": 0
+            }
+        
+        # Generate optimization ID
+        optimization_id = f"opt_{int(time.time())}_{symbol}"
+        
+        return jsonify({
+            "success": True,
+            "optimizationId": optimization_id,
+            "symbol": symbol,
+            "strategy": strategy,
+            "totalCombinations": total_valid_combinations,
+            "validCombinations": len(optimization_results),
+            "results": optimization_results,
+            "bestCombination": best_combination,
+            "summary": summary
+        })
+        
+    except Exception as e:
+        print(f"Optimization error: {str(e)}")
+        return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/backtest/results/<backtest_id>', methods=['GET'])
 def get_backtest_results(backtest_id):

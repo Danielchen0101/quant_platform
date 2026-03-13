@@ -1,0 +1,2993 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { Card, Form, Input, InputNumber, Button, Select, DatePicker, Row, Col, Statistic, Table, Tag, Alert, Space, Divider, message, Empty, Spin, Progress, Tabs, Checkbox, Tooltip } from 'antd';
+import { PlayCircleOutlined, HistoryOutlined, LineChartOutlined, ArrowUpOutlined, ArrowDownOutlined, ReloadOutlined, EyeOutlined, DownOutlined, ExperimentOutlined } from '@ant-design/icons';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { backtraderAPI } from '../services/api';
+import dayjs from 'dayjs';
+import TradingChart from '../components/TradingChart';
+import DrawdownChart from '../components/DrawdownChart';
+import TradeLogTable from '../components/TradeLogTable';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer } from 'recharts';
+
+const { Option } = Select;
+const { RangePicker } = DatePicker;
+
+// Helper function to format percentage
+const formatPercent = (value: number | undefined | null): string => {
+  if (value === undefined || value === null || isNaN(value)) {
+    return 'N/A';
+  }
+  const sign = value > 0 ? '+' : '';
+  return `${sign}${value.toFixed(2)}%`;
+};
+
+// Interface for optimization results (copied from ParameterOptimization.tsx)
+interface OptimizationResult {
+  rank: number;
+  short_ma: number;
+  long_ma: number;
+  totalReturn: number;
+  annualizedReturn: number;
+  sharpeRatio: number;
+  maxDrawdown: number;
+  trades: number;
+  winRate?: number;
+  profitLoss?: number;
+  volatility?: number;
+  sortinoRatio?: number;
+  profitFactor?: number;
+  expectancy?: number;
+  exposure?: number;
+}
+
+// Heatmap component (copied and adapted from ParameterOptimization.tsx)
+const OptimizationHeatmap = ({ results }: { results: OptimizationResult[] }) => {
+  // Get unique short_ma and long_ma values
+  const shortSet = new Set<number>();
+  const longSet = new Set<number>();
+  results.forEach((r: OptimizationResult) => {
+    shortSet.add(r.short_ma);
+    longSet.add(r.long_ma);
+  });
+  const shortValues = Array.from(shortSet).sort((a, b) => a - b);
+  const longValues = Array.from(longSet).sort((a, b) => a - b);
+
+  // Create a map for quick lookup
+  const resultMap = new Map<string, OptimizationResult>();
+  results.forEach((result: OptimizationResult) => {
+    resultMap.set(`${result.short_ma}_${result.long_ma}`, result);
+  });
+
+  // Calculate Sharpe Ratio range for color scaling
+  const sharpeValues = results.map((r: OptimizationResult) => r.sharpeRatio);
+  const minSharpe = Math.min(...sharpeValues);
+  const maxSharpe = Math.max(...sharpeValues);
+  const sharpeRange = maxSharpe - minSharpe;
+
+  // Function to get color based on Sharpe Ratio
+  const getColor = (sharpe: number) => {
+    if (sharpeRange === 0) return '#d9d9d9'; // Gray if all values are the same
+    
+    const normalized = (sharpe - minSharpe) / sharpeRange;
+    
+    // Color gradient: red (low) -> yellow (medium) -> green (high)
+    if (normalized < 0.5) {
+      // Red to Yellow
+      const r = 255;
+      const g = Math.round(255 * (normalized * 2));
+      return `rgb(${r}, ${g}, 0)`;
+    } else {
+      // Yellow to Green
+      const r = Math.round(255 * (1 - (normalized - 0.5) * 2));
+      const g = 255;
+      return `rgb(${r}, ${g}, 0)`;
+    }
+  };
+
+  return (
+    <div style={{ 
+      display: 'grid',
+      gridTemplateColumns: `auto repeat(${shortValues.length}, 1fr)`,
+      gap: '4px',
+      fontSize: '12px',
+      maxWidth: '800px',
+      margin: '0 auto'
+    }}>
+      {/* Top-left empty cell */}
+      <div style={{ 
+        padding: '12px',
+        textAlign: 'center',
+        fontWeight: '600',
+        background: '#fafafa',
+        fontSize: '11px',
+        color: '#333',
+        borderRight: '2px solid #1890ff',
+        borderBottom: '2px solid #1890ff'
+      }}>
+        <div>Short MA</div>
+        <div style={{ fontSize: '10px', color: '#666', marginTop: '2px' }}>→ X-axis</div>
+      </div>
+      
+      {/* X-axis headers (short_ma values) */}
+      {shortValues.map(shortVal => (
+        <div key={`header-${shortVal}`} style={{ 
+          padding: '12px',
+          textAlign: 'center',
+          fontWeight: '600',
+          background: '#fafafa',
+          borderBottom: '2px solid #1890ff',
+          fontSize: '12px',
+          color: '#333'
+        }}>
+          {shortVal}
+        </div>
+      ))}
+      
+      {/* Heatmap rows */}
+      {longValues.map(longVal => (
+        <React.Fragment key={`row-${longVal}`}>
+          {/* Y-axis header (long_ma value) */}
+          <div style={{ 
+            padding: '12px',
+            textAlign: 'center',
+            fontWeight: '600',
+            background: '#fafafa',
+            borderRight: '2px solid #1890ff',
+            fontSize: '12px',
+            color: '#333'
+          }}>
+            <div>{longVal}</div>
+            <div style={{ fontSize: '10px', color: '#666', marginTop: '2px' }}>Y-axis</div>
+          </div>
+          
+          {/* Heatmap cells */}
+          {shortValues.map(shortVal => {
+            const result = resultMap.get(`${shortVal}_${longVal}`);
+            const hasResult = !!result;
+            const sharpe = hasResult ? result.sharpeRatio : 0;
+            
+            return (
+              <Tooltip
+                key={`cell-${shortVal}-${longVal}`}
+                title={hasResult ? (
+                  <div style={{ fontSize: '13px', color: '#000', padding: '4px 0' }}>
+                    <div style={{ marginBottom: '6px', fontWeight: '600', fontSize: '14px' }}>
+                      Short MA: {shortVal}, Long MA: {longVal}
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                      <div>
+                        <div style={{ fontSize: '11px', color: '#666' }}>Sharpe</div>
+                        <div style={{ color: sharpe >= 0 ? '#52c41a' : '#ff4d4f', fontWeight: '600' }}>
+                          {sharpe.toFixed(2)}
+                        </div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: '11px', color: '#666' }}>Return</div>
+                        <div style={{ color: result.totalReturn >= 0 ? '#52c41a' : '#ff4d4f', fontWeight: '600' }}>
+                          {result.totalReturn >= 0 ? '+' : ''}{result.totalReturn.toFixed(2)}%
+                        </div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: '11px', color: '#666' }}>Max DD</div>
+                        <div style={{ color: '#ff4d4f', fontWeight: '600' }}>
+                          {result.maxDrawdown.toFixed(2)}%
+                        </div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: '11px', color: '#666' }}>Trades</div>
+                        <div style={{ fontWeight: '600' }}>
+                          {result.trades}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ color: '#000', fontSize: '13px' }}>
+                    No data for Short MA={shortVal}, Long MA={longVal}
+                  </div>
+                )}
+                placement="top"
+                color="white"
+                overlayStyle={{ maxWidth: '280px' }}
+              >
+                <div
+                  style={{
+                    width: '40px',
+                    height: '40px',
+                    background: hasResult ? getColor(sharpe) : '#f5f5f5',
+                    border: '1px solid #e8e8e8',
+                    borderRadius: '4px',
+                    cursor: hasResult ? 'pointer' : 'default',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    transition: 'transform 0.2s',
+                    fontSize: '10px',
+                    fontWeight: 'bold'
+                  }}
+                  onMouseEnter={(e) => {
+                    if (hasResult) {
+                      e.currentTarget.style.transform = 'scale(1.1)';
+                      e.currentTarget.style.zIndex = '1';
+                      e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.15)';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (hasResult) {
+                      e.currentTarget.style.transform = 'scale(1)';
+                      e.currentTarget.style.zIndex = '0';
+                      e.currentTarget.style.boxShadow = 'none';
+                    }
+                  }}
+                >
+                  {hasResult && (
+                    <span style={{
+                      color: sharpe >= 0 ? '#000' : '#fff',
+                      fontWeight: 'bold',
+                      fontSize: '9px'
+                    }}>
+                      {sharpe.toFixed(1)}
+                    </span>
+                  )}
+                </div>
+              </Tooltip>
+            );
+          })}
+        </React.Fragment>
+      ))}
+      
+      {/* Color legend */}
+      <div style={{ 
+        gridColumn: `1 / span ${shortValues.length + 1}`,
+        marginTop: '16px',
+        paddingTop: '16px',
+        borderTop: '1px solid #e8e8e8'
+      }}>
+        <div style={{ fontSize: '11px', color: '#666', marginBottom: '8px' }}>
+          Sharpe Ratio Color Legend:
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '10px' }}>
+          <div style={{ display: 'flex', alignItems: 'center' }}>
+            <div style={{ width: '12px', height: '12px', background: 'rgb(255, 0, 0)', marginRight: '4px' }}></div>
+            <span>Low ({minSharpe.toFixed(2)})</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center' }}>
+            <div style={{ width: '12px', height: '12px', background: 'rgb(255, 255, 0)', marginRight: '4px' }}></div>
+            <span>Medium</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center' }}>
+            <div style={{ width: '12px', height: '12px', background: 'rgb(0, 255, 0)', marginRight: '4px' }}></div>
+            <span>High ({maxSharpe.toFixed(2)})</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center' }}>
+            <div style={{ width: '12px', height: '12px', background: '#f5f5f5', border: '1px solid #e8e8e8', marginRight: '4px' }}></div>
+            <span>No Data</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+
+
+interface BacktestConfig {
+  symbol: string;
+  strategy: string;
+  startDate: string;
+  endDate: string;
+  initialCapital: number;
+}
+
+interface BacktestResult {
+  backtestId: string;
+  status: 'running' | 'completed' | 'failed';
+  results: {
+    totalReturn: number;
+    sharpeRatio: number;
+    maxDrawdown: number;
+    winRate: number;
+    trades: number;
+    annualizedReturn: number;
+    profitLoss?: number;
+    calmarRatio: number;
+    avgReturnPerTrade?: number;
+    equityCurve?: Array<{ date: string; equity: number }>;
+    volatility?: number;
+    sortinoRatio?: number;
+    profitFactor?: number;
+    expectancy?: number;
+    exposure?: number;
+    chartData?: Array<{
+      date: string;
+      close: number;
+      signal: number;
+      sma20?: number;
+      sma50?: number;
+    }>;
+    tradesList?: Array<{
+      entryDate: string;
+      exitDate: string;
+      entryPrice: number;
+      exitPrice: number;
+      pnl: number;
+      returnPct: number;
+      holdingDays: number;
+      position: number;
+    }>;
+    buyHoldReturn?: number;
+    buyHoldEquitySeries?: Array<{ date: string; equity: number }>;
+    monthlyReturns?: Array<{
+      year: number;
+      month: number;
+      monthName: string;
+      return: number;
+    }>;
+    rollingSharpeRatio?: Array<{
+      date: string;
+      sharpe: number;
+    }>;
+  };
+  parameters: {
+    strategy: string;
+    symbols: string[];
+    period: string;
+    initialCapital: number;
+  };
+  createdAt?: string;
+  drawdownCurve?: Array<{ date: string; drawdown: number }>;
+}
+
+interface BacktestHistoryItem {
+  backtestId: string;
+  status: 'running' | 'completed' | 'failed';
+  results?: {
+    totalReturn: number;
+    sharpeRatio: number;
+    maxDrawdown: number;
+    winRate: number;
+    trades: number;
+    annualizedReturn?: number;
+    profitLoss?: number;
+  };
+  parameters?: {
+    strategy: string;
+    symbols: string[];
+    period: string;
+    initialCapital: number;
+  };
+  createdAt?: string;
+  symbol?: string;
+  strategy?: string;
+  startDate?: string;
+  endDate?: string;
+  initialCapital?: number;
+  totalReturn?: number;
+  sharpeRatio?: number;
+  maxDrawdown?: number;
+  winRate?: number;
+  trades?: number;
+}
+
+// Parameter optimization interfaces
+interface OptimizationResultItem {
+  short_ma: number;
+  long_ma: number;
+  totalReturn: number;
+  annualizedReturn: number;
+  sharpeRatio: number;
+  maxDrawdown: number;
+  trades: number;
+  winRate: number;
+  profitLoss: number;
+  volatility: number;
+  sortinoRatio: number;
+  profitFactor: number;
+  expectancy: number;
+  exposure: number;
+}
+
+interface OptimizationResponse {
+  success: boolean;
+  optimizationId: string;
+  symbol: string;
+  strategy: string;
+  totalCombinations: number;
+  validCombinations: number;
+  results: OptimizationResultItem[];
+  bestCombination: OptimizationResultItem;
+  summary: {
+    bestSharpe: number;
+    bestReturn: number;
+    lowestDrawdown: number;
+    averageSharpe: number;
+  };
+}
+
+const Backtest: React.FC = () => {
+  const [form] = Form.useForm();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const resultsRef = useRef<HTMLDivElement>(null);
+  const [loading, setLoading] = useState(false);
+  const [backtestResult, setBacktestResult] = useState<BacktestResult | null>(null);
+  const [backtestHistory, setBacktestHistory] = useState<BacktestHistoryItem[]>([]);
+  const [error, setError] = useState<string>('');
+  const [historyLoading, setHistoryLoading] = useState(true);
+  const [selectedBacktests, setSelectedBacktests] = useState<string[]>([]);
+  
+  // Parameter optimization states
+  const [showOptimization, setShowOptimization] = useState(true); // Default to expanded
+  const [optimizationLoading, setOptimizationLoading] = useState(false);
+  const [optimizationResult, setOptimizationResult] = useState<any>(null);
+  const [optimizationError, setOptimizationError] = useState<string>('');
+
+  // 设置默认日期范围（最近1年）使用 dayjs
+  const defaultDateRange = () => {
+    const end = dayjs();
+    const start = dayjs().subtract(1, 'year');
+    return [start, end];
+  };
+
+  // 从URL参数或location state获取symbol
+  useEffect(() => {
+    const searchParams = new URLSearchParams(location.search);
+    const symbolFromUrl = searchParams.get('symbol');
+    
+    if (symbolFromUrl) {
+      form.setFieldsValue({ 
+        symbol: symbolFromUrl.toUpperCase(),
+        dateRange: defaultDateRange()
+      });
+    }
+    
+    // 从location state获取symbol（从Market页面跳转时）
+    if (location.state && location.state.symbol) {
+      form.setFieldsValue({ 
+        symbol: location.state.symbol.toUpperCase(),
+        strategy: location.state.strategy || 'moving_average',
+        dateRange: defaultDateRange(),
+        initialCapital: location.state.initialCapital || 100000
+      });
+    } else {
+      // 设置默认值
+      form.setFieldsValue({
+        dateRange: defaultDateRange(),
+        initialCapital: 100000,
+        strategy: 'moving_average'
+      });
+    }
+    
+    // 加载回测历史
+    fetchBacktestHistory();
+  }, [location, form]);
+
+  const safeToFixed = (value: any, decimals: number = 2): string => {
+    if (typeof value === 'number' && !isNaN(value)) {
+      return value.toFixed(decimals);
+    }
+    return '0.00';
+  };
+
+  const safeNumber = (value: any): number => {
+    if (typeof value === 'number' && !isNaN(value)) {
+      return value;
+    }
+    return 0;
+  };
+
+  const formatCurrency = (value: number): string => {
+    const safeValue = safeNumber(value);
+    if (safeValue >= 1e9) {
+      return `$${safeToFixed(safeValue / 1e9, 2)}B`;
+    } else if (safeValue >= 1e6) {
+      return `$${safeToFixed(safeValue / 1e6, 2)}M`;
+    } else if (safeValue >= 1e3) {
+      return `$${safeToFixed(safeValue / 1e3, 2)}K`;
+    }
+    return `$${safeToFixed(safeValue, 2)}`;
+  };
+
+  const fetchBacktestHistory = async () => {
+    try {
+      setHistoryLoading(true);
+      const response = await backtraderAPI.getBacktestHistory();
+      if (response.data && Array.isArray(response.data)) {
+        // 转换后端数据为前端需要的平铺结构
+        const historyData = response.data.map((item: any) => {
+          const symbol = item.parameters?.symbols?.[0] || 'Unknown';
+          const strategy = item.parameters?.strategy || 'Unknown';
+          const period = item.parameters?.period || '';
+          const [startDate, endDate] = period.split(' to ') || ['', ''];
+          
+          return {
+            backtestId: item.backtestId || '',
+            status: item.status || 'unknown',
+            results: item.results,
+            parameters: item.parameters,
+            createdAt: item.createdAt,
+            // 平铺字段用于表格显示
+            symbol: symbol,
+            strategy: strategy,
+            startDate: startDate,
+            endDate: endDate,
+            initialCapital: safeNumber(item.parameters?.initialCapital),
+            totalReturn: safeNumber(item.results?.totalReturn),
+            sharpeRatio: safeNumber(item.results?.sharpeRatio),
+            maxDrawdown: safeNumber(item.results?.maxDrawdown),
+            winRate: safeNumber(item.results?.winRate),
+            trades: safeNumber(item.results?.trades),
+            annualizedReturn: safeNumber(item.results?.annualizedReturn),
+            profitLoss: safeNumber(item.results?.profitLoss),
+          };
+        });
+        
+        setBacktestHistory(historyData);
+      }
+    } catch (err) {
+      console.error('Failed to fetch backtest history:', err);
+      // 如果接口不存在或出错，使用空数组
+      setBacktestHistory([]);
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  const handleRunBacktest = async (values: any) => {
+    setLoading(true);
+    setError('');
+    setBacktestResult(null); // 清除旧结果，开始新的回测
+    
+    try {
+      const symbol = values.symbol.toUpperCase();
+      const config = {
+        symbol: symbol,
+        strategy: values.strategy,
+        startDate: values.dateRange[0].format('YYYY-MM-DD'),
+        endDate: values.dateRange[1].format('YYYY-MM-DD'),
+        initialCapital: values.initialCapital,
+      };
+      
+      console.log('Running backtest with config:', config);
+      
+      const response = await backtraderAPI.runBacktest(config);
+      
+      if (response.data) {
+        const result = response.data;
+        
+        // 检查后端是否同步返回完整结果（主要检查results字段）
+        if (result.results) {
+          // 后端已同步返回完整结果，直接使用
+          setBacktestResult(result);
+          setLoading(false);
+          
+          // 如果有status字段，根据状态显示相应消息
+          if (result.status === 'completed') {
+            message.success('Backtest completed successfully!');
+          } else if (result.status === 'failed') {
+            message.error('Backtest failed. Please check parameters and try again.');
+          } else if (result.status) {
+            message.info(`Backtest status: ${result.status}`);
+          } else {
+            message.success('Backtest completed!');
+          }
+          
+          // 滚动到结果区域
+          setTimeout(() => {
+            resultsRef.current?.scrollIntoView({ behavior: 'smooth' });
+          }, 100);
+          
+          // 刷新历史记录
+          fetchBacktestHistory();
+        } else if (result.backtestId) {
+          // 兼容旧版本：后端返回了 backtestId 但没有完整结果
+          // 这种情况下可能需要轮询，但根据当前修改，后端应该总是返回完整结果
+          setBacktestResult(null);
+          setError('Backtest started but results not available immediately. Please try again.');
+          message.error('Backtest response incomplete');
+          setLoading(false);
+        } else {
+          setBacktestResult(null);
+          setError('Failed to start backtest: Invalid response format');
+          message.error('Failed to start backtest');
+          setLoading(false);
+        }
+      } else {
+        setBacktestResult(null);
+        setError('Failed to start backtest: No response data');
+        message.error('Failed to start backtest');
+        setLoading(false);
+      }
+    } catch (err: any) {
+      setBacktestResult(null);
+      setError(`Error running backtest: ${err.message || 'Unknown error'}`);
+      message.error('Failed to run backtest');
+      console.error('Backtest error:', err);
+      setLoading(false);
+    }
+  };
+
+  const loadBacktestResult = async (backtestId: string) => {
+    try {
+      const response = await backtraderAPI.getBacktestResults(backtestId);
+      if (response.data) {
+        setBacktestResult(response.data);
+        // 滚动到结果区域
+        setTimeout(() => {
+          resultsRef.current?.scrollIntoView({ behavior: 'smooth' });
+        }, 100);
+        message.success('Backtest results loaded');
+      }
+    } catch (err) {
+      console.error('Error loading backtest:', err);
+      message.error('Failed to load backtest results');
+    }
+  };
+
+  // Parameter optimization handler
+  const handleRunOptimization = async (values: any) => {
+    console.log('=== handleRunOptimization called ===');
+    console.log('Received values:', values);
+    
+    setOptimizationLoading(true);
+    setOptimizationError('');
+    setOptimizationResult(null);
+    
+    try {
+      const symbol = values.symbol.toUpperCase();
+      const strategy = values.strategy;
+      
+      // Only moving_average strategy is supported for optimization
+      if (strategy !== 'moving_average') {
+        setOptimizationError('Parameter optimization is only supported for Moving Average strategy');
+        setOptimizationLoading(false);
+        return;
+      }
+      
+      // Get optimization parameters from form
+      const shortMin = parseInt(values.shortMin) || 5;
+      const shortMax = parseInt(values.shortMax) || 20;
+      const shortStep = parseInt(values.shortStep) || 5;
+      const longMin = parseInt(values.longMin) || 20;
+      const longMax = parseInt(values.longMax) || 100;
+      const longStep = parseInt(values.longStep) || 20;
+      
+      // Validate parameter ranges
+      if (shortMin <= 0 || shortMax <= 0 || shortStep <= 0) {
+        setOptimizationError('short_ma values must be positive');
+        setOptimizationLoading(false);
+        return;
+      }
+      
+      if (longMin <= 0 || longMax <= 0 || longStep <= 0) {
+        setOptimizationError('long_ma values must be positive');
+        setOptimizationLoading(false);
+        return;
+      }
+      
+      if (shortMin >= shortMax) {
+        setOptimizationError('short_ma min must be less than max');
+        setOptimizationLoading(false);
+        return;
+      }
+      
+      if (longMin >= longMax) {
+        setOptimizationError('long_ma min must be less than max');
+        setOptimizationLoading(false);
+        return;
+      }
+      
+      // Ensure short_ma values are less than long_ma values
+      if (shortMax >= longMin) {
+        setOptimizationError('short_ma max must be less than long_ma min to ensure valid combinations (short_ma < long_ma)');
+        setOptimizationLoading(false);
+        return;
+      }
+      
+      // Generate all possible combinations and filter valid ones (short_ma < long_ma)
+      const shortCount = Math.floor((shortMax - shortMin) / shortStep) + 1;
+      const longCount = Math.floor((longMax - longMin) / longStep) + 1;
+      const totalPossibleCombinations = shortCount * longCount;
+      
+      // Calculate valid combinations (where short_ma < long_ma)
+      let validCombinations = 0;
+      for (let s = shortMin; s <= shortMax; s += shortStep) {
+        for (let l = longMin; l <= longMax; l += longStep) {
+          if (s < l) {
+            validCombinations++;
+          }
+        }
+      }
+      
+      if (validCombinations === 0) {
+        setOptimizationError('No valid parameter combinations found. Ensure short_ma values are less than long_ma values.');
+        setOptimizationLoading(false);
+        return;
+      }
+      
+      if (validCombinations > 50) {
+        setOptimizationError(`Too many valid parameter combinations: ${validCombinations}. Maximum is 50.`);
+        setOptimizationLoading(false);
+        return;
+      }
+      
+      console.log(`DEBUG: ${validCombinations} valid combinations out of ${totalPossibleCombinations} total possible`);
+      
+      // Prepare optimization request
+      const optimizationConfig = {
+        symbol: symbol,
+        strategy: strategy,
+        startDate: values.dateRange[0].format('YYYY-MM-DD'),
+        endDate: values.dateRange[1].format('YYYY-MM-DD'),
+        initialCapital: values.initialCapital || 10000,
+        parameters: {
+          short_ma: {
+            min: shortMin,
+            max: shortMax,
+            step: shortStep
+          },
+          long_ma: {
+            min: longMin,
+            max: longMax,
+            step: longStep
+          }
+        }
+      };
+      
+      console.log('=== FRONTEND: Sending optimization request ===');
+      console.log('Request config:', JSON.stringify(optimizationConfig, null, 2));
+      console.log('Request parameters structure:');
+      console.log('- short_ma:', optimizationConfig.parameters.short_ma);
+      console.log('- long_ma:', optimizationConfig.parameters.long_ma);
+      
+      // Call optimization API
+      const response = await backtraderAPI.runParameterOptimization(optimizationConfig);
+      
+      console.log('=== FRONTEND: Received optimization response ===');
+      console.log('Response status:', response.status);
+      console.log('Response success:', response.data?.success);
+      console.log('Response error:', response.data?.error);
+      console.log('Response data keys:', response.data ? Object.keys(response.data) : 'No data');
+      
+      if (response.data?.results) {
+        console.log('Results count:', response.data.results.length);
+        if (response.data.results.length > 0) {
+          console.log('First result fields:', Object.keys(response.data.results[0]));
+          console.log('First result:', response.data.results[0]);
+        }
+      }
+      
+      if (response.data && response.data.success) {
+        console.log('=== Setting optimizationResult state ===');
+        console.log('Data to set:', response.data);
+        console.log('Has success:', response.data.success);
+        console.log('Has results:', !!response.data.results);
+        console.log('Results count:', response.data.results?.length);
+        console.log('Has bestCombination:', !!response.data.bestCombination);
+        
+        setOptimizationResult(response.data);
+        message.success(`Parameter optimization completed: ${response.data.validCombinations} valid combinations`);
+        
+        // Scroll to optimization results
+        setTimeout(() => {
+          resultsRef.current?.scrollIntoView({ behavior: 'smooth' });
+        }, 100);
+      } else {
+        const errorMsg = response.data?.error || 'Optimization failed';
+        setOptimizationError(errorMsg);
+        message.error(`Parameter optimization failed: ${errorMsg}`);
+        console.error('Optimization failed with error:', errorMsg);
+        console.error('Response data:', response.data);
+      }
+      
+    } catch (err: any) {
+      setOptimizationError(`Error running parameter optimization: ${err.message || 'Unknown error'}`);
+      message.error('Failed to run parameter optimization');
+      console.error('Optimization error:', err);
+    } finally {
+      setOptimizationLoading(false);
+    }
+  };
+
+  const strategyOptions = [
+    { value: 'moving_average', label: 'Moving Average Crossover', type: 'real', description: 'Real calculation using Yahoo Finance data' },
+    { value: 'rsi', label: 'RSI Strategy', type: 'real', description: 'Real calculation using Yahoo Finance data' },
+    { value: 'macd', label: 'MACD Strategy', type: 'real', description: 'Real calculation using Yahoo Finance data' },
+    { value: 'bollinger', label: 'Bollinger Bands', type: 'simulated', description: 'Simulated results (to be implemented)' },
+    { value: 'momentum', label: 'Momentum Strategy', type: 'real', description: 'Real calculation using Yahoo Finance data' },
+  ];
+
+  const resultColumns = [
+    {
+      title: 'Metric',
+      dataIndex: 'metric',
+      key: 'metric',
+      width: 150,
+    },
+    {
+      title: 'Value',
+      dataIndex: 'value',
+      key: 'value',
+      render: (value: any, record: any) => {
+        // Handle non-numeric values for specific metrics
+        if (record.metric === 'Strategy Type' || record.metric === 'Status') {
+          if (record.metric === 'Status') {
+            const statusColors: Record<string, string> = {
+              'running': 'blue',
+              'completed': 'green',
+              'failed': 'red'
+            };
+            const statusValue = value || 'unknown';
+            return <Tag color={statusColors[statusValue] || 'default'}>{statusValue}</Tag>;
+          } else {
+            // Strategy Type
+            return <span style={{ fontWeight: 'bold' }}>{value || 'Unknown'}</span>;
+          }
+        }
+        
+        // For numeric metrics, use safeNumber
+        const safeValue = safeNumber(value);
+        
+        if (record.metric === 'Profit / Loss') {
+          // Profit/Loss 是金额，使用货币格式
+          const color = safeValue >= 0 ? '#3f8600' : '#cf1322';
+          const formatted = formatCurrency(safeValue);
+          return <span style={{ color, fontWeight: 'bold' }}>{formatted}</span>;
+        } else if (record.metric.includes('Return')) {
+          // Return 类指标使用百分比格式
+          const color = safeValue >= 0 ? '#3f8600' : '#cf1322';
+          const prefix = record.metric.includes('$') ? '' : (safeValue >= 0 ? '+' : '');
+          const suffix = record.metric.includes('$') ? '' : '%';
+          return <span style={{ color, fontWeight: 'bold' }}>{prefix}{safeToFixed(safeValue, 2)}{suffix}</span>;
+        } else if (record.metric === 'Expectancy') {
+          // Expectancy 使用百分比格式
+          const color = safeValue >= 0 ? '#3f8600' : '#cf1322';
+          const prefix = safeValue >= 0 ? '+' : '';
+          return <span style={{ color, fontWeight: 'bold' }}>{prefix}{safeToFixed(safeValue, 2)}%</span>;
+        } else if (record.metric === 'Volatility') {
+          // Volatility 使用百分比格式
+          const color = safeValue < 20 ? '#3f8600' : safeValue < 40 ? '#faad14' : '#cf1322';
+          return <span style={{ color, fontWeight: 'bold' }}>{safeToFixed(safeValue, 2)}%</span>;
+        } else if (record.metric === 'Exposure') {
+          // Exposure 使用百分比格式
+          const color = safeValue > 80 ? '#3f8600' : safeValue > 50 ? '#faad14' : '#cf1322';
+          return <span style={{ color, fontWeight: 'bold' }}>{safeToFixed(safeValue, 1)}%</span>;
+        } else if (record.metric === 'Sharpe Ratio' || record.metric === 'Calmar Ratio' || record.metric === 'Sortino Ratio' || record.metric === 'Profit Factor') {
+          const color = safeValue >= 1 ? '#3f8600' : safeValue >= 0 ? '#faad14' : '#cf1322';
+          return <span style={{ color, fontWeight: 'bold' }}>{safeToFixed(safeValue, 2)}</span>;
+        } else if (record.metric === 'Max Drawdown') {
+          return <span style={{ color: '#cf1322', fontWeight: 'bold' }}>{safeToFixed(safeValue, 2)}%</span>;
+        } else if (record.metric === 'Win Rate') {
+          const color = safeValue >= 60 ? '#3f8600' : safeValue >= 40 ? '#faad14' : '#cf1322';
+          return <span style={{ color, fontWeight: 'bold' }}>{safeToFixed(safeValue, 1)}%</span>;
+        } else if (record.metric === 'Trades') {
+          return <span style={{ fontWeight: 'bold' }}>{Math.round(safeValue)}</span>;
+        }
+        return safeToFixed(safeValue, 2);
+      },
+    },
+    {
+      title: 'Description',
+      dataIndex: 'description',
+      key: 'description',
+    },
+  ];
+
+  const historyColumns = [
+    {
+      title: 'Select',
+      key: 'selection',
+      width: 60,
+      render: (_: any, record: BacktestHistoryItem) => (
+        <Checkbox
+          checked={selectedBacktests.includes(record.backtestId)}
+          onChange={(e) => {
+            if (e.target.checked) {
+              setSelectedBacktests([...selectedBacktests, record.backtestId]);
+            } else {
+              setSelectedBacktests(selectedBacktests.filter(id => id !== record.backtestId));
+            }
+          }}
+        />
+      ),
+    },
+    {
+      title: 'Symbol',
+      dataIndex: 'symbol',
+      key: 'symbol',
+      width: 100,
+      render: (symbol: string) => <strong>{symbol || 'Unknown'}</strong>,
+    },
+    {
+      title: 'Strategy',
+      dataIndex: 'strategy',
+      key: 'strategy',
+      width: 150,
+      render: (strategy: string) => {
+        const strategyNames: Record<string, string> = {
+          'moving_average': 'MA Crossover',
+          'rsi': 'RSI',
+          'macd': 'MACD',
+          'bollinger': 'Bollinger',
+          'momentum': 'Momentum'
+        };
+        return strategyNames[strategy] || strategy || 'Unknown';
+      },
+    },
+    {
+      title: 'Period',
+      dataIndex: 'startDate',
+      key: 'period',
+      width: 120,
+      render: (startDate: string, record: BacktestHistoryItem) => {
+        if (!startDate || !record.endDate) return 'N/A';
+        return `${startDate} to ${record.endDate}`.replace(/^(\d{4}-\d{2}-\d{2}) to (\d{4}-\d{2}-\d{2})$/, (_, start, end) => {
+          return `${start.split('-').slice(1).join('/')} - ${end.split('-').slice(1).join('/')}`;
+        });
+      },
+    },
+    {
+      title: 'Return',
+      dataIndex: 'totalReturn',
+      key: 'totalReturn',
+      width: 100,
+      render: (value: number) => {
+        const safeValue = safeNumber(value);
+        const color = safeValue >= 0 ? '#3f8600' : '#cf1322';
+        return <span style={{ color, fontWeight: 'bold' }}>{safeValue >= 0 ? '+' : ''}{safeToFixed(safeValue, 2)}%</span>;
+      },
+    },
+    {
+      title: 'Sharpe',
+      dataIndex: 'sharpeRatio',
+      key: 'sharpeRatio',
+      width: 80,
+      render: (value: number) => safeToFixed(safeNumber(value), 2),
+    },
+    {
+      title: 'Status',
+      dataIndex: 'status',
+      key: 'status',
+      width: 100,
+      render: (status: string) => {
+        const statusColors: Record<string, string> = {
+          'running': 'blue',
+          'completed': 'green',
+          'failed': 'red'
+        };
+        return <Tag color={statusColors[status] || 'default'}>{status}</Tag>;
+      },
+    },
+    {
+      title: 'Date',
+      dataIndex: 'createdAt',
+      key: 'createdAt',
+      width: 100,
+      render: (date: string) => {
+        if (!date) return 'N/A';
+        try {
+          return new Date(date).toLocaleDateString();
+        } catch {
+          return 'Invalid Date';
+        }
+      },
+    },
+    {
+      title: 'Action',
+      key: 'action',
+      width: 80,
+      render: (_: any, record: BacktestHistoryItem) => (
+        <Button
+          type="link"
+          size="small"
+          icon={<EyeOutlined />}
+          onClick={() => record.backtestId && navigate(`/backtest/${record.backtestId}`)}
+          disabled={!record.backtestId}
+        >
+          View
+        </Button>
+      ),
+    },
+  ];
+
+  // Get current strategy info
+  const currentStrategy = strategyOptions.find(opt => opt.value === backtestResult?.parameters?.strategy);
+  const strategyType = currentStrategy?.type || 'unknown';
+  const strategyDescription = currentStrategy?.description || '';
+  
+  // Add strategy type info to result data
+  const resultData = backtestResult ? [
+    { 
+      key: 'strategyType', 
+      metric: 'Strategy Type', 
+      value: strategyType === 'real' ? 'Real Calculation' : 'Simulated Results', 
+      description: strategyDescription 
+    },
+    { 
+      key: 'status', 
+      metric: 'Status', 
+      value: backtestResult.status, 
+      description: 'Current backtest status' 
+    },
+    { 
+      key: 'totalReturn', 
+      metric: 'Total Return', 
+      value: safeNumber(backtestResult.results?.totalReturn), 
+      description: 'Total return over the period' 
+    },
+    { 
+      key: 'annualizedReturn', 
+      metric: 'Annualized Return', 
+      value: safeNumber(backtestResult.results?.annualizedReturn), 
+      description: 'Annualized return (CAGR)' 
+    },
+    { 
+      key: 'profitLoss', 
+      metric: 'Profit / Loss', 
+      value: safeNumber(backtestResult.results?.profitLoss), 
+      description: `Profit/Loss amount (from $${safeNumber(backtestResult.parameters?.initialCapital).toLocaleString()})` 
+    },
+    { 
+      key: 'sharpeRatio', 
+      metric: 'Sharpe Ratio', 
+      value: safeNumber(backtestResult.results?.sharpeRatio), 
+      description: 'Risk-adjusted return (higher is better)' 
+    },
+    { 
+      key: 'calmarRatio', 
+      metric: 'Calmar Ratio', 
+      value: safeNumber(backtestResult.results?.calmarRatio), 
+      description: 'Return vs max drawdown (higher is better)' 
+    },
+    { 
+      key: 'maxDrawdown', 
+      metric: 'Max Drawdown', 
+      value: safeNumber(backtestResult.results?.maxDrawdown), 
+      description: 'Maximum loss from a peak' 
+    },
+    { 
+      key: 'winRate', 
+      metric: 'Win Rate', 
+      value: safeNumber(backtestResult.results?.winRate), 
+      description: 'Percentage of winning trades' 
+    },
+    { 
+      key: 'trades', 
+      metric: 'Trades', 
+      value: safeNumber(backtestResult.results?.trades), 
+      description: 'Total number of trades executed' 
+    },
+    { 
+      key: 'avgReturnPerTrade', 
+      metric: 'Avg Return per Trade', 
+      value: safeNumber(backtestResult.results?.avgReturnPerTrade), 
+      description: 'Average return per trade (annualized)' 
+    },
+    { 
+      key: 'volatility', 
+      metric: 'Volatility', 
+      value: safeNumber(backtestResult.results?.volatility), 
+      description: 'Annualized volatility of strategy returns' 
+    },
+    { 
+      key: 'sortinoRatio', 
+      metric: 'Sortino Ratio', 
+      value: safeNumber(backtestResult.results?.sortinoRatio), 
+      description: 'Risk-adjusted return considering only downside volatility' 
+    },
+    { 
+      key: 'profitFactor', 
+      metric: 'Profit Factor', 
+      value: safeNumber(backtestResult.results?.profitFactor), 
+      description: 'Gross profit divided by gross loss (higher is better)' 
+    },
+    { 
+      key: 'expectancy', 
+      metric: 'Expectancy', 
+      value: safeNumber(backtestResult.results?.expectancy), 
+      description: 'Expected return per trade based on win rate and average win/loss' 
+    },
+    { 
+      key: 'exposure', 
+      metric: 'Exposure', 
+      value: safeNumber(backtestResult.results?.exposure), 
+      description: 'Percentage of time the strategy held positions' 
+    },
+  ] : [];
+
+  // 生成模拟权益曲线数据（简化版本，不使用图表库）
+  const generateEquityCurveData = () => {
+    if (backtestResult?.results?.equityCurve && backtestResult.results.equityCurve.length > 0) {
+      return backtestResult.results.equityCurve;
+    }
+    
+    // 模拟数据
+    const curve = [];
+    const initialCapital = safeNumber(backtestResult?.parameters?.initialCapital) || 100000;
+    const totalReturn = safeNumber(backtestResult?.results?.totalReturn) || 15.23;
+    const finalEquity = initialCapital * (1 + totalReturn / 100);
+    
+    for (let i = 0; i < 10; i++) {
+      const progress = i / 9;
+      const equity = initialCapital + (finalEquity - initialCapital) * progress;
+      
+      const date = new Date();
+      date.setDate(date.getDate() - (9 - i));
+      
+      curve.push({
+        date: date.toISOString().split('T')[0],
+        equity: Math.max(equity, initialCapital * 0.8)
+      });
+    }
+    
+    return curve;
+  };
+
+  const equityCurveData = generateEquityCurveData();
+
+  // 计算回撤数据
+  const calculateDrawdownData = () => {
+    if (!equityCurveData || equityCurveData.length === 0) return [];
+    
+    let runningMax = equityCurveData[0].equity;
+    const drawdownData = equityCurveData.map(point => {
+      runningMax = Math.max(runningMax, point.equity);
+      const drawdown = ((point.equity - runningMax) / runningMax) * 100;
+      return {
+        date: point.date,
+        drawdown: parseFloat(drawdown.toFixed(2)) // 保留2位小数
+      };
+    });
+    
+    return drawdownData;
+  };
+
+  const drawdownData = calculateDrawdownData();
+
+  return (
+    <div>
+      <h1 style={{ marginBottom: 24 }}>Strategy Backtest</h1>
+      
+      {error && (
+        <Alert
+          message="Error"
+          description={error}
+          type="error"
+          showIcon
+          style={{ marginBottom: 16 }}
+          closable
+          onClose={() => setError('')}
+        />
+      )}
+      
+      <Row gutter={[16, 16]}>
+        <Col span={16}>
+          <Card title="Backtest Configuration">
+            <Form
+              form={form}
+              layout="vertical"
+              onFinish={handleRunBacktest}
+              initialValues={{
+                symbol: '',
+                strategy: 'moving_average',
+                initialCapital: 100000,
+              }}
+            >
+              <Row gutter={16}>
+                <Col span={12}>
+                  <Form.Item
+                    label="Stock Symbol"
+                    name="symbol"
+                    rules={[{ required: true, message: 'Please enter stock symbol' }]}
+                    help="e.g., AAPL, MSFT, GOOGL, TSLA"
+                  >
+                    <Input 
+                      placeholder="Enter stock symbol" 
+                      size="large"
+                      prefix={<LineChartOutlined />}
+                      onBlur={(e) => {
+                        if (e.target.value) {
+                          form.setFieldsValue({ symbol: e.target.value.toUpperCase() });
+                        }
+                      }}
+                    />
+                  </Form.Item>
+                </Col>
+                <Col span={12}>
+                  <Form.Item
+                    label="Strategy"
+                    name="strategy"
+                    rules={[{ required: true, message: 'Please select a strategy' }]}
+                  >
+                    <Select size="large" placeholder="Select strategy">
+                      {strategyOptions.map(option => (
+                        <Option key={option.value} value={option.value}>
+                          {option.label} {option.type === 'simulated' ? '(Simulated)' : '(Real)'}
+                        </Option>
+                      ))}
+                    </Select>
+                  </Form.Item>
+                </Col>
+              </Row>
+              
+              <Row gutter={16}>
+                <Col span={12}>
+                  <Form.Item
+                    label="Date Range"
+                    name="dateRange"
+                    rules={[{ required: true, message: 'Please select date range' }]}
+                    help="Default: Last 1 year"
+                  >
+                    <RangePicker size="large" style={{ width: '100%' }} />
+                  </Form.Item>
+                </Col>
+                <Col span={12}>
+                  <Form.Item
+                    label="Initial Capital ($)"
+                    name="initialCapital"
+                    rules={[
+                      { required: true, message: 'Please enter initial capital' },
+                      { type: 'number', min: 1000, message: 'Minimum $1,000' },
+                    ]}
+                    help="Minimum: $1,000"
+                  >
+                    <InputNumber
+                      min={1000}
+                      size="large"
+                      style={{ width: '100%' }}
+                    />
+                  </Form.Item>
+                </Col>
+              </Row>
+              
+              {/* Parameter Optimization Panel (only shown for moving_average strategy) */}
+              {form.getFieldValue('strategy') === 'moving_average' && (
+                <div style={{ marginBottom: 16 }}>
+                  <div 
+                    style={{ 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      cursor: 'pointer',
+                      padding: '12px',
+                      background: showOptimization ? '#f0f7ff' : '#fafafa',
+                      borderRadius: '4px',
+                      border: `1px solid ${showOptimization ? '#1890ff' : '#e8e8e8'}`,
+                      marginBottom: showOptimization ? 8 : 0,
+                      transition: 'all 0.2s'
+                    }}
+                    onClick={() => {
+                      console.log('=== CLICK: Advanced: Parameter Optimization ===');
+                      console.log('Current showOptimization:', showOptimization);
+                      console.log('Setting to:', !showOptimization);
+                      setShowOptimization(!showOptimization);
+                    }}
+                  >
+                    <DownOutlined style={{ 
+                      marginRight: 8, 
+                      transform: showOptimization ? 'rotate(180deg)' : 'rotate(0deg)',
+                      transition: 'transform 0.2s',
+                      color: showOptimization ? '#1890ff' : '#666'
+                    }} />
+                    <span style={{ 
+                      fontWeight: 600, 
+                      fontSize: '14px',
+                      color: showOptimization ? '#1890ff' : '#333'
+                    }}>
+                      Advanced: Parameter Optimization {showOptimization ? '(Expanded)' : '(Click to expand)'}
+                    </span>
+                  </div>
+                  
+                  {showOptimization && (
+                    <div style={{ 
+                      padding: '16px', 
+                      background: '#fafafa', 
+                      borderRadius: '4px',
+                      marginTop: '8px'
+                    }}>
+                      <div style={{ marginBottom: 16 }}>
+                        <h4 style={{ marginBottom: 8 }}>Moving Average Parameters</h4>
+                        <p style={{ color: '#666', fontSize: '12px', marginBottom: 16 }}>
+                          Configure parameter ranges for optimization. Maximum 50 valid combinations.
+                        </p>
+                      </div>
+                      
+                      <Row gutter={16}>
+                        <Col span={12}>
+                          <div style={{ marginBottom: 16 }}>
+                            <h5 style={{ marginBottom: 8 }}>Short MA (fast)</h5>
+                            <Row gutter={8}>
+                              <Col span={8}>
+                                <Form.Item
+                                  label="Min"
+                                  name="shortMin"
+                                  initialValue={5}
+                                  rules={[
+                                    { required: true, message: 'Required' },
+                                    { type: 'number', min: 1, message: 'Min 1' }
+                                  ]}
+                                >
+                                  <InputNumber min={1} style={{ width: '100%' }} />
+                                </Form.Item>
+                              </Col>
+                              <Col span={8}>
+                                <Form.Item
+                                  label="Max"
+                                  name="shortMax"
+                                  initialValue={20}
+                                  rules={[
+                                    { required: true, message: 'Required' },
+                                    { type: 'number', min: 1, message: 'Min 1' }
+                                  ]}
+                                >
+                                  <InputNumber min={1} style={{ width: '100%' }} />
+                                </Form.Item>
+                              </Col>
+                              <Col span={8}>
+                                <Form.Item
+                                  label="Step"
+                                  name="shortStep"
+                                  initialValue={5}
+                                  rules={[
+                                    { required: true, message: 'Required' },
+                                    { type: 'number', min: 1, message: 'Min 1' }
+                                  ]}
+                                >
+                                  <InputNumber min={1} style={{ width: '100%' }} />
+                                </Form.Item>
+                              </Col>
+                            </Row>
+                          </div>
+                        </Col>
+                        
+                        <Col span={12}>
+                          <div style={{ marginBottom: 16 }}>
+                            <h5 style={{ marginBottom: 8 }}>Long MA (slow)</h5>
+                            <Row gutter={8}>
+                              <Col span={8}>
+                                <Form.Item
+                                  label="Min"
+                                  name="longMin"
+                                  initialValue={50}
+                                  rules={[
+                                    { required: true, message: 'Required' },
+                                    { type: 'number', min: 1, message: 'Min 1' }
+                                  ]}
+                                >
+                                  <InputNumber min={1} style={{ width: '100%' }} />
+                                </Form.Item>
+                              </Col>
+                              <Col span={8}>
+                                <Form.Item
+                                  label="Max"
+                                  name="longMax"
+                                  initialValue={100}
+                                  rules={[
+                                    { required: true, message: 'Required' },
+                                    { type: 'number', min: 1, message: 'Min 1' }
+                                  ]}
+                                >
+                                  <InputNumber min={1} style={{ width: '100%' }} />
+                                </Form.Item>
+                              </Col>
+                              <Col span={8}>
+                                <Form.Item
+                                  label="Step"
+                                  name="longStep"
+                                  initialValue={50}
+                                  rules={[
+                                    { required: true, message: 'Required' },
+                                    { type: 'number', min: 1, message: 'Min 1' }
+                                  ]}
+                                >
+                                  <InputNumber min={1} style={{ width: '100%' }} />
+                                </Form.Item>
+                              </Col>
+                            </Row>
+                          </div>
+                        </Col>
+                      </Row>
+                      
+                      {optimizationError && (
+                        <Alert
+                          message="Optimization Error"
+                          description={optimizationError}
+                          type="error"
+                          showIcon
+                          style={{ marginBottom: 16 }}
+                          closable
+                          onClose={() => setOptimizationError('')}
+                        />
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+              
+              <Form.Item>
+                <Row gutter={16}>
+                  <Col span={form.getFieldValue('strategy') === 'moving_average' ? 12 : 24}>
+                    <Button
+                      type="primary"
+                      htmlType="submit"
+                      size="large"
+                      loading={loading}
+                      icon={<PlayCircleOutlined />}
+                      style={{ width: '100%' }}
+                      disabled={loading}
+                    >
+                      {loading ? 'Running Backtest...' : 'Run Backtest'}
+                    </Button>
+                  </Col>
+                  
+                  {form.getFieldValue('strategy') === 'moving_average' && (
+                    <Col span={12}>
+                      <Button
+                        type="default"
+                        htmlType="button"  // 明确设置为 button，防止触发表单提交
+                        size="large"
+                        loading={optimizationLoading}
+                        icon={<ExperimentOutlined />}
+                        style={{ width: '100%' }}
+                        disabled={optimizationLoading || loading}
+                        onClick={(e) => {
+                          e.preventDefault(); // 防止默认行为
+                          e.stopPropagation(); // 阻止事件冒泡
+                          
+                          console.log('=== OPTIMIZATION BUTTON CLICKED ===');
+                          const currentStrategy = form.getFieldValue('strategy');
+                          
+                          // Check if strategy is moving_average
+                          if (currentStrategy !== 'moving_average') {
+                            message.error('Parameter optimization is only available for Moving Average strategy');
+                            return;
+                          }
+                          
+                          // Get form values and run optimization
+                          // Use getFieldsValue to get all form values, not just validated ones
+                          const formValues = form.getFieldsValue();
+                          console.log('=== FORM VALUES ===');
+                          console.log('All form values:', formValues);
+                          console.log('Optimization parameters:');
+                          console.log('  shortMin:', formValues.shortMin);
+                          console.log('  shortMax:', formValues.shortMax);
+                          console.log('  shortStep:', formValues.shortStep);
+                          console.log('  longMin:', formValues.longMin);
+                          console.log('  longMax:', formValues.longMax);
+                          console.log('  longStep:', formValues.longStep);
+                          
+                          // Check if optimization parameters are filled
+                          // Use default values if not provided
+                          const shortMin = formValues.shortMin || 5;
+                          const shortMax = formValues.shortMax || 20;
+                          const shortStep = formValues.shortStep || 5;
+                          const longMin = formValues.longMin || 50;
+                          const longMax = formValues.longMax || 100;
+                          const longStep = formValues.longStep || 50;
+                          
+                          console.log('Using parameters:');
+                          console.log('  short_ma:', { min: shortMin, max: shortMax, step: shortStep });
+                          console.log('  long_ma:', { min: longMin, max: longMax, step: longStep });
+                          
+                          // Create values object with defaults
+                          const valuesWithDefaults = {
+                            ...formValues,
+                            shortMin,
+                            shortMax,
+                            shortStep,
+                            longMin,
+                            longMax,
+                            longStep
+                          };
+                          
+                          console.log('Starting optimization with values:', valuesWithDefaults);
+                          handleRunOptimization(valuesWithDefaults);
+                        }}
+                      >
+                        {optimizationLoading ? 'Running Optimization...' : 'Run Parameter Optimization'}
+                      </Button>
+                    </Col>
+                  )}
+                </Row>
+              </Form.Item>
+            </Form>
+          </Card>
+          
+          {backtestResult && (
+            <div ref={resultsRef}>
+              <Card title="Backtest Results" style={{ marginTop: 16 }}>
+                <Tabs
+                  defaultActiveKey="results"
+                  items={[
+                    {
+                      key: 'results',
+                      label: 'Results Table',
+                      children: (
+                        <>
+                          <Table
+                            columns={resultColumns}
+                            dataSource={resultData}
+                            pagination={false}
+                            size="small"
+                          />
+                          
+                          <Divider />
+                          
+                          {/* Benchmark Comparison */}
+                          {backtestResult?.results?.buyHoldReturn !== undefined && backtestResult?.results?.buyHoldEquitySeries && (
+                            <>
+                              <h4 style={{ marginBottom: '16px' }}>Benchmark Comparison</h4>
+                              <div style={{ 
+                                background: '#fafafa',
+                                borderRadius: '8px',
+                                padding: '20px',
+                                marginBottom: '24px'
+                              }}>
+                                {/* Return Comparison */}
+                                <div style={{ marginBottom: '20px' }}>
+                                  <h5 style={{ marginBottom: '12px', color: '#333' }}>Return Comparison</h5>
+                                  <div style={{ 
+                                    display: 'grid', 
+                                    gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                                    gap: '16px'
+                                  }}>
+                                    <div style={{ 
+                                      background: 'white',
+                                      padding: '16px',
+                                      borderRadius: '6px',
+                                      border: '1px solid #e8e8e8'
+                                    }}>
+                                      <div style={{ fontSize: '12px', color: '#666', marginBottom: '4px' }}>Strategy Return</div>
+                                      <div style={{ 
+                                        fontSize: '20px', 
+                                        fontWeight: '600',
+                                        color: (backtestResult.results?.totalReturn || 0) >= 0 ? '#3f8600' : '#cf1322'
+                                      }}>
+                                        {formatPercent(backtestResult.results?.totalReturn)}
+                                      </div>
+                                    </div>
+                                    
+                                    <div style={{ 
+                                      background: 'white',
+                                      padding: '16px',
+                                      borderRadius: '6px',
+                                      border: '1px solid #e8e8e8'
+                                    }}>
+                                      <div style={{ fontSize: '12px', color: '#666', marginBottom: '4px' }}>Buy & Hold Return</div>
+                                      <div style={{ 
+                                        fontSize: '20px', 
+                                        fontWeight: '600',
+                                        color: (backtestResult.results?.buyHoldReturn || 0) >= 0 ? '#3f8600' : '#cf1322'
+                                      }}>
+                                        {formatPercent(backtestResult.results?.buyHoldReturn)}
+                                      </div>
+                                    </div>
+                                    
+                                    <div style={{ 
+                                      background: 'white',
+                                      padding: '16px',
+                                      borderRadius: '6px',
+                                      border: '1px solid #e8e8e8'
+                                    }}>
+                                      <div style={{ fontSize: '12px', color: '#666', marginBottom: '4px' }}>Excess Return</div>
+                                      <div style={{ 
+                                        fontSize: '20px', 
+                                        fontWeight: '600',
+                                        color: ((backtestResult.results?.totalReturn || 0) - (backtestResult.results?.buyHoldReturn || 0)) >= 0 ? '#3f8600' : '#cf1322'
+                                      }}>
+                                        {formatPercent((backtestResult.results?.totalReturn || 0) - (backtestResult.results?.buyHoldReturn || 0))}
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                                
+                                {/* Equity Comparison Chart */}
+                                <div>
+                                  <h5 style={{ marginBottom: '12px', color: '#333' }}>Equity Comparison</h5>
+                                  <div style={{ 
+                                    height: '200px', 
+                                    background: 'white',
+                                    borderRadius: '6px',
+                                    padding: '16px',
+                                    border: '1px solid #e8e8e8'
+                                  }}>
+                                    {(() => {
+                                      const strategyEquityData = equityCurveData;
+                                      const buyHoldEquityData = backtestResult.results?.buyHoldEquitySeries || [];
+                                      
+                                      if (strategyEquityData.length === 0 || buyHoldEquityData.length === 0) {
+                                        return (
+                                          <div style={{
+                                            height: '100%',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            color: '#999',
+                                            fontSize: '12px'
+                                          }}>
+                                            No equity data available
+                                          </div>
+                                        );
+                                      }
+                                      
+                                      // Prepare data for Recharts
+                                      // We need to combine both datasets into a single array
+                                      // First, create a map of dates to ensure we have all dates
+                                      const dateMap = new Map();
+                                      
+                                      // Add strategy equity data
+                                      strategyEquityData.forEach(item => {
+                                        dateMap.set(item.date, {
+                                          date: item.date,
+                                          strategy: item.equity,
+                                          buyHold: null
+                                        });
+                                      });
+                                      
+                                      // Add buy & hold equity data
+                                      buyHoldEquityData.forEach(item => {
+                                        if (dateMap.has(item.date)) {
+                                          dateMap.get(item.date).buyHold = item.equity;
+                                        } else {
+                                          dateMap.set(item.date, {
+                                            date: item.date,
+                                            strategy: null,
+                                            buyHold: item.equity
+                                          });
+                                        }
+                                      });
+                                      
+                                      // Convert to array and sort by date
+                                      const equityComparisonData = Array.from(dateMap.values())
+                                        .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+                                      
+                                      // Fill missing values with linear interpolation
+                                      for (let i = 0; i < equityComparisonData.length; i++) {
+                                        if (equityComparisonData[i].strategy === null && i > 0 && i < equityComparisonData.length - 1) {
+                                          // Find nearest strategy values
+                                          let prevStrategy = null;
+                                          let nextStrategy = null;
+                                          for (let j = i - 1; j >= 0; j--) {
+                                            if (equityComparisonData[j].strategy !== null) {
+                                              prevStrategy = equityComparisonData[j].strategy;
+                                              break;
+                                            }
+                                          }
+                                          for (let j = i + 1; j < equityComparisonData.length; j++) {
+                                            if (equityComparisonData[j].strategy !== null) {
+                                              nextStrategy = equityComparisonData[j].strategy;
+                                              break;
+                                            }
+                                          }
+                                          if (prevStrategy !== null && nextStrategy !== null) {
+                                            equityComparisonData[i].strategy = prevStrategy;
+                                          }
+                                        }
+                                        
+                                        if (equityComparisonData[i].buyHold === null && i > 0 && i < equityComparisonData.length - 1) {
+                                          // Find nearest buyHold values
+                                          let prevBuyHold = null;
+                                          let nextBuyHold = null;
+                                          for (let j = i - 1; j >= 0; j--) {
+                                            if (equityComparisonData[j].buyHold !== null) {
+                                              prevBuyHold = equityComparisonData[j].buyHold;
+                                              break;
+                                            }
+                                          }
+                                          for (let j = i + 1; j < equityComparisonData.length; j++) {
+                                            if (equityComparisonData[j].buyHold !== null) {
+                                              nextBuyHold = equityComparisonData[j].buyHold;
+                                              break;
+                                            }
+                                          }
+                                          if (prevBuyHold !== null && nextBuyHold !== null) {
+                                            equityComparisonData[i].buyHold = prevBuyHold;
+                                          }
+                                        }
+                                      }
+                                      
+                                      return (
+                                        <ResponsiveContainer width="100%" height="100%">
+                                          <LineChart
+                                            data={equityComparisonData}
+                                            margin={{ top: 5, right: 5, left: 5, bottom: 5 }}
+                                          >
+                                            <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                                            <XAxis 
+                                              dataKey="date" 
+                                              tick={{ fontSize: 10 }}
+                                              tickFormatter={(value) => {
+                                                // Format date to show only month/day for better readability
+                                                const date = new Date(value);
+                                                return `${date.getMonth() + 1}/${date.getDate()}`;
+                                              }}
+                                            />
+                                            <YAxis 
+                                              tick={{ fontSize: 10 }}
+                                              tickFormatter={(value) => `$${value.toFixed(0)}`}
+                                            />
+                                            <RechartsTooltip 
+                                              formatter={(value, name) => {
+                                                if (name === 'strategy') return [`$${Number(value).toFixed(2)}`, 'Strategy Equity'];
+                                                if (name === 'buyHold') return [`$${Number(value).toFixed(2)}`, 'Buy & Hold Equity'];
+                                                return [value, name];
+                                              }}
+                                              labelFormatter={(label) => `Date: ${label}`}
+                                            />
+                                            <Legend 
+                                              wrapperStyle={{ fontSize: '12px', paddingTop: '5px' }}
+                                              formatter={(value) => {
+                                                if (value === 'strategy') return 'Strategy Equity';
+                                                if (value === 'buyHold') return 'Buy & Hold Equity';
+                                                return value;
+                                              }}
+                                            />
+                                            <Line
+                                              type="monotone"
+                                              dataKey="strategy"
+                                              stroke="#1890ff"
+                                              strokeWidth={2}
+                                              dot={false}
+                                              activeDot={{ r: 4 }}
+                                              name="strategy"
+                                            />
+                                            <Line
+                                              type="monotone"
+                                              dataKey="buyHold"
+                                              stroke="#52c41a"
+                                              strokeWidth={2}
+                                              strokeDasharray="5 5"
+                                              dot={false}
+                                              activeDot={{ r: 4 }}
+                                              name="buyHold"
+                                            />
+                                          </LineChart>
+                                        </ResponsiveContainer>
+                                      );
+                                    })()}
+                                  </div>
+                                  
+                                  {/* Performance Summary */}
+                                  <div style={{ 
+                                    marginTop: '16px',
+                                    fontSize: '12px',
+                                    color: '#666',
+                                    textAlign: 'center'
+                                  }}>
+                                    {((backtestResult.results?.totalReturn || 0) > (backtestResult.results?.buyHoldReturn || 0)) ? (
+                                      <span style={{ color: '#3f8600' }}>
+                                        Strategy outperforms Buy & Hold by {formatPercent((backtestResult.results?.totalReturn || 0) - (backtestResult.results?.buyHoldReturn || 0))}
+                                      </span>
+                                    ) : (
+                                      <span style={{ color: '#cf1322' }}>
+                                        Strategy underperforms Buy & Hold by {formatPercent(Math.abs((backtestResult.results?.totalReturn || 0) - (backtestResult.results?.buyHoldReturn || 0)))}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                              
+                              <Divider />
+                            </>
+                          )}
+                          
+                          {/* Parameter Optimization Results */}
+                          {optimizationResult && optimizationResult.success && (
+                            <div style={{ marginTop: '32px' }}>
+                              <h4 style={{ marginBottom: '24px' }}>Parameter Optimization Results</h4>
+                              
+                              {/* Best Combination Summary */}
+                              <Card style={{ marginBottom: '24px' }}>
+                                <div style={{ marginBottom: '16px', fontSize: '16px', fontWeight: '600', color: '#333' }}>
+                                  Optimization Summary
+                                </div>
+                                <Row gutter={[24, 24]}>
+                                  <Col span={4}>
+                                    <div style={{ textAlign: 'center' }}>
+                                      <div style={{ fontSize: '24px', fontWeight: '600', color: '#1890ff', marginBottom: '4px' }}>
+                                        {optimizationResult.totalCombinations}
+                                      </div>
+                                      <div style={{ fontSize: '12px', color: '#666' }}>
+                                        Total Combinations
+                                      </div>
+                                    </div>
+                                  </Col>
+                                  <Col span={4}>
+                                    <div style={{ textAlign: 'center' }}>
+                                      <div style={{ fontSize: '24px', fontWeight: '600', color: '#52c41a', marginBottom: '4px' }}>
+                                        {optimizationResult.validCombinations}
+                                      </div>
+                                      <div style={{ fontSize: '12px', color: '#666' }}>
+                                        Valid Results
+                                      </div>
+                                    </div>
+                                  </Col>
+                                  <Col span={4}>
+                                    <div style={{ textAlign: 'center' }}>
+                                      <div style={{ fontSize: '24px', fontWeight: '600', color: '#3f8600', marginBottom: '4px' }}>
+                                        {formatPercent(optimizationResult.bestCombination.totalReturn)}
+                                      </div>
+                                      <div style={{ fontSize: '12px', color: '#666' }}>
+                                        Best Return
+                                      </div>
+                                    </div>
+                                  </Col>
+                                  <Col span={4}>
+                                    <div style={{ textAlign: 'center' }}>
+                                      <div style={{ fontSize: '24px', fontWeight: '600', color: '#cf1322', marginBottom: '4px' }}>
+                                        {(() => {
+                                          // Find worst return from all results
+                                          const worstReturn = Math.min(...optimizationResult.results.map((r: OptimizationResult) => r.totalReturn));
+                                          return formatPercent(worstReturn);
+                                        })()}
+                                      </div>
+                                      <div style={{ fontSize: '12px', color: '#666' }}>
+                                        Worst Return
+                                      </div>
+                                    </div>
+                                  </Col>
+                                  <Col span={4}>
+                                    <div style={{ textAlign: 'center' }}>
+                                      <div style={{ fontSize: '24px', fontWeight: '600', color: '#fa8c16', marginBottom: '4px' }}>
+                                        {(() => {
+                                          // Calculate average return
+                                          const avgReturn = optimizationResult.results.reduce((sum: number, r: OptimizationResult) => sum + r.totalReturn, 0) / optimizationResult.results.length;
+                                          return formatPercent(avgReturn);
+                                        })()}
+                                      </div>
+                                      <div style={{ fontSize: '12px', color: '#666' }}>
+                                        Average Return
+                                      </div>
+                                    </div>
+                                  </Col>
+                                  <Col span={4}>
+                                    <div style={{ textAlign: 'center' }}>
+                                      <div style={{ fontSize: '24px', fontWeight: '600', color: '#ffd700', marginBottom: '4px' }}>
+                                        {optimizationResult.bestCombination.short_ma}/{optimizationResult.bestCombination.long_ma}
+                                      </div>
+                                      <div style={{ fontSize: '12px', color: '#666' }}>
+                                        Top Combination
+                                      </div>
+                                    </div>
+                                  </Col>
+                                </Row>
+                              </Card>
+
+                              {/* Optimization Heatmap */}
+                              <Card style={{ marginBottom: '24px' }}>
+                                <h3 style={{ marginBottom: '16px' }}>Optimization Heatmap</h3>
+                                <div style={{ 
+                                  background: 'white',
+                                  borderRadius: '8px',
+                                  padding: '20px',
+                                  border: '1px solid #e8e8e8',
+                                  display: 'flex',
+                                  flexDirection: 'column',
+                                  alignItems: 'center'
+                                }}>
+                                  <div style={{ marginBottom: '16px', fontSize: '12px', color: '#666', textAlign: 'center' }}>
+                                    X-axis: Short MA (fast), Y-axis: Long MA (slow). Color represents Sharpe Ratio.
+                                  </div>
+                                  <OptimizationHeatmap results={optimizationResult.results} />
+                                </div>
+                              </Card>
+
+                              {/* Optimization Results Table */}
+                              <Card title="Optimization Results">
+                                <Table
+                                  columns={[
+                                    {
+                                      title: 'Rank',
+                                      dataIndex: 'rank',
+                                      key: 'rank',
+                                      width: 80,
+                                      render: (rank: number) => (
+                                        <div style={{ 
+                                          display: 'flex', 
+                                          alignItems: 'center', 
+                                          justifyContent: 'center',
+                                          fontWeight: 'bold',
+                                          fontSize: rank === 1 ? '16px' : '14px',
+                                          color: rank === 1 ? '#ffd700' : rank === 2 ? '#c0c0c0' : rank === 3 ? '#cd7f32' : '#666'
+                                        }}>
+                                          {rank}
+                                        </div>
+                                      ),
+                                    },
+                                    {
+                                      title: 'Short MA',
+                                      dataIndex: 'short_ma',
+                                      key: 'short_ma',
+                                      width: 90,
+                                      render: (value: number) => (
+                                        <Tag color="blue" style={{ fontWeight: 'bold' }}>
+                                          {value}
+                                        </Tag>
+                                      ),
+                                    },
+                                    {
+                                      title: 'Long MA',
+                                      dataIndex: 'long_ma',
+                                      key: 'long_ma',
+                                      width: 90,
+                                      render: (value: number) => (
+                                        <Tag color="green" style={{ fontWeight: 'bold' }}>
+                                          {value}
+                                        </Tag>
+                                      ),
+                                    },
+                                    {
+                                      title: 'Total Return',
+                                      dataIndex: 'totalReturn',
+                                      key: 'totalReturn',
+                                      width: 120,
+                                      defaultSortOrder: 'descend' as const,
+                                      sorter: (a: OptimizationResult, b: OptimizationResult) => a.totalReturn - b.totalReturn,
+                                      render: (value: number) => {
+                                        const color = value >= 0 ? '#3f8600' : '#cf1322';
+                                        return (
+                                          <span style={{ color, fontWeight: 'bold', fontSize: '14px' }}>
+                                            {formatPercent(value)}
+                                          </span>
+                                        );
+                                      },
+                                    },
+                                    {
+                                      title: 'Annualized',
+                                      dataIndex: 'annualizedReturn',
+                                      key: 'annualizedReturn',
+                                      width: 120,
+                                      sorter: (a: OptimizationResult, b: OptimizationResult) => a.annualizedReturn - b.annualizedReturn,
+                                      render: (value: number) => {
+                                        const color = value >= 0 ? '#3f8600' : '#cf1322';
+                                        return (
+                                          <span style={{ color, fontWeight: 'bold' }}>
+                                            {formatPercent(value)}
+                                          </span>
+                                        );
+                                      },
+                                    },
+                                    {
+                                      title: 'Sharpe',
+                                      dataIndex: 'sharpeRatio',
+                                      key: 'sharpeRatio',
+                                      width: 90,
+                                      sorter: (a: OptimizationResult, b: OptimizationResult) => a.sharpeRatio - b.sharpeRatio,
+                                      render: (value: number) => {
+                                        const color = value >= 1 ? '#3f8600' : value >= 0 ? '#fa8c16' : '#cf1322';
+                                        return (
+                                          <span style={{ color, fontWeight: 'bold' }}>
+                                            {value.toFixed(2)}
+                                          </span>
+                                        );
+                                      },
+                                    },
+                                    {
+                                      title: 'Max DD',
+                                      dataIndex: 'maxDrawdown',
+                                      key: 'maxDrawdown',
+                                      width: 90,
+                                      sorter: (a: OptimizationResult, b: OptimizationResult) => a.maxDrawdown - b.maxDrawdown,
+                                      render: (value: number) => {
+                                        let color = '#cf1322'; // 默认红色
+                                        if (value > -20) {
+                                          color = '#3f8600'; // 绿色
+                                        } else if (value >= -40) {
+                                          color = '#fa8c16'; // 橙色
+                                        }
+                                        return (
+                                          <span style={{ color, fontWeight: 'bold' }}>
+                                            {value.toFixed(1)}%
+                                          </span>
+                                        );
+                                      },
+                                    },
+                                    {
+                                      title: 'Trades',
+                                      dataIndex: 'trades',
+                                      key: 'trades',
+                                      width: 80,
+                                      sorter: (a: OptimizationResult, b: OptimizationResult) => a.trades - b.trades,
+                                      render: (value: number) => (
+                                        <span style={{ fontWeight: 'bold' }}>
+                                          {Math.round(value)}
+                                        </span>
+                                      ),
+                                    },
+                                  ]}
+                                  dataSource={optimizationResult.results}
+                                  pagination={{
+                                    pageSize: 10,
+                                    showSizeChanger: true,
+                                    showQuickJumper: true,
+                                    showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} combinations`,
+                                  }}
+                                  size="middle"
+                                  scroll={{ x: 800 }}
+                                  bordered
+                                  rowClassName={(record, index) => 
+                                    index === 0 ? 'top-rank-row' : index === 1 ? 'second-rank-row' : index === 2 ? 'third-rank-row' : ''
+                                  }
+                                />
+                              </Card>
+                            </div>
+                          )}
+                              
+                              {/* Best Combination Summary */}
+                              <div style={{ 
+                                background: '#fafafa',
+                                borderRadius: '8px',
+                                padding: '20px',
+                                marginBottom: '24px',
+                                border: '1px solid #e8e8e8'
+                              }}>
+                                <h5 style={{ marginBottom: '16px', color: '#1890ff' }}>Best Combination Summary</h5>
+                                
+                                <Row gutter={[16, 16]}>
+                                  <Col span={8}>
+                                    <div style={{ textAlign: 'center' }}>
+                                      <div style={{ fontSize: '12px', color: '#666', marginBottom: '4px' }}>Short MA</div>
+                                      <div style={{ fontSize: '20px', fontWeight: 'bold' }}>
+                                        {optimizationResult.bestCombination.short_ma}
+                                      </div>
+                                    </div>
+                                  </Col>
+                                  <Col span={8}>
+                                    <div style={{ textAlign: 'center' }}>
+                                      <div style={{ fontSize: '12px', color: '#666', marginBottom: '4px' }}>Long MA</div>
+                                      <div style={{ fontSize: '20px', fontWeight: 'bold' }}>
+                                        {optimizationResult.bestCombination.long_ma}
+                                      </div>
+                                    </div>
+                                  </Col>
+                                  <Col span={8}>
+                                    <div style={{ textAlign: 'center' }}>
+                                      <div style={{ fontSize: '12px', color: '#666', marginBottom: '4px' }}>Trades</div>
+                                      <div style={{ fontSize: '20px', fontWeight: 'bold' }}>
+                                        {optimizationResult.bestCombination.trades}
+                                      </div>
+                                    </div>
+                                  </Col>
+                                </Row>
+                                
+                                <Divider style={{ margin: '16px 0' }} />
+                                
+                                <Row gutter={[16, 16]}>
+                                  <Col span={8}>
+                                    <div style={{ textAlign: 'center' }}>
+                                      <div style={{ fontSize: '12px', color: '#666', marginBottom: '4px' }}>Sharpe Ratio</div>
+                                      <div style={{ 
+                                        fontSize: '20px', 
+                                        fontWeight: 'bold',
+                                        color: optimizationResult.bestCombination.sharpeRatio >= 0 ? '#52c41a' : '#ff4d4f'
+                                      }}>
+                                        {optimizationResult.bestCombination.sharpeRatio.toFixed(2)}
+                                      </div>
+                                    </div>
+                                  </Col>
+                                  <Col span={8}>
+                                    <div style={{ textAlign: 'center' }}>
+                                      <div style={{ fontSize: '12px', color: '#666', marginBottom: '4px' }}>Total Return</div>
+                                      <div style={{ 
+                                        fontSize: '20px', 
+                                        fontWeight: 'bold',
+                                        color: optimizationResult.bestCombination.totalReturn >= 0 ? '#52c41a' : '#ff4d4f'
+                                      }}>
+                                        {optimizationResult.bestCombination.totalReturn >= 0 ? '+' : ''}{optimizationResult.bestCombination.totalReturn.toFixed(2)}%
+                                      </div>
+                                    </div>
+                                  </Col>
+                                  <Col span={8}>
+                                    <div style={{ textAlign: 'center' }}>
+                                      <div style={{ fontSize: '12px', color: '#666', marginBottom: '4px' }}>Max Drawdown</div>
+                                      <div style={{ 
+                                        fontSize: '20px', 
+                                        fontWeight: 'bold',
+                                        color: '#ff4d4f'
+                                      }}>
+                                        {optimizationResult.bestCombination.maxDrawdown.toFixed(2)}%
+                                      </div>
+                                    </div>
+                                  </Col>
+                                </Row>
+                                
+                                <div style={{ 
+                                  marginTop: '16px', 
+                                  padding: '12px',
+                                  background: '#e6f7ff',
+                                  borderRadius: '4px',
+                                  fontSize: '12px',
+                                  color: '#1890ff'
+                                }}>
+                                  <strong>Optimization Summary:</strong> {optimizationResult.totalCombinations} valid combinations tested. 
+                                  Best Sharpe Ratio: {optimizationResult.bestCombination.sharpeRatio.toFixed(2)}
+                                </div>
+                              </div>
+                              
+                              {/* Optimization Heatmap */}
+                              <div style={{ marginBottom: '32px' }}>
+                                <h5 style={{ marginBottom: '16px' }}>Optimization Heatmap</h5>
+                                <div style={{ 
+                                  background: 'white',
+                                  borderRadius: '8px',
+                                  padding: '20px',
+                                  border: '1px solid #e8e8e8',
+                                  display: 'flex',
+                                  flexDirection: 'column',
+                                  alignItems: 'center'
+                                }}>
+                                  <div style={{ marginBottom: '16px', fontSize: '12px', color: '#666', textAlign: 'center' }}>
+                                    X-axis: Short MA (fast), Y-axis: Long MA (slow). Color represents Sharpe Ratio.
+                                  </div>
+                                  
+                                  {(() => {
+                                    // Prepare data for heatmap
+                                    const results: OptimizationResultItem[] = optimizationResult.results;
+                                    
+                                    // Get unique short_ma and long_ma values
+                                    const shortSet = new Set<number>();
+                                    const longSet = new Set<number>();
+                                    results.forEach((r: OptimizationResultItem) => {
+                                      shortSet.add(r.short_ma);
+                                      longSet.add(r.long_ma);
+                                    });
+                                    const shortValues = Array.from(shortSet).sort((a, b) => a - b);
+                                    const longValues = Array.from(longSet).sort((a, b) => a - b);
+                                    
+                                    // Find min and max Sharpe Ratio for color scaling
+                                    const sharpeValues = results.map((r: OptimizationResultItem) => r.sharpeRatio);
+                                    const minSharpe = Math.min(...sharpeValues);
+                                    const maxSharpe = Math.max(...sharpeValues);
+                                    const sharpeRange = maxSharpe - minSharpe;
+                                    
+                                    // Create a map for quick lookup
+                                    const resultMap = new Map<string, OptimizationResultItem>();
+                                    results.forEach((result: OptimizationResultItem) => {
+                                      resultMap.set(`${result.short_ma}_${result.long_ma}`, result);
+                                    });
+                                    
+                                    // Function to get color based on Sharpe Ratio
+                                    const getColor = (sharpe: number) => {
+                                      if (sharpeRange === 0) return '#d9d9d9'; // Gray if all values are the same
+                                      
+                                      const normalized = (sharpe - minSharpe) / sharpeRange;
+                                      
+                                      // Color gradient: red (low) -> yellow (medium) -> green (high)
+                                      if (normalized < 0.5) {
+                                        // Red to Yellow
+                                        const r = 255;
+                                        const g = Math.round(255 * (normalized * 2));
+                                        return `rgb(${r}, ${g}, 0)`;
+                                      } else {
+                                        // Yellow to Green
+                                        const r = Math.round(255 * (1 - (normalized - 0.5) * 2));
+                                        const g = 255;
+                                        return `rgb(${r}, ${g}, 0)`;
+                                      }
+                                    };
+                                    
+                                    return (
+                                      <div style={{ 
+                                        display: 'grid',
+                                        gridTemplateColumns: `auto repeat(${shortValues.length}, 1fr)`,
+                                        gap: '2px',
+                                        fontSize: '10px'
+                                      }}>
+                                        {/* Top-left empty cell */}
+                                        <div style={{ 
+                                          padding: '8px',
+                                          textAlign: 'center',
+                                          fontWeight: 'bold',
+                                          background: '#fafafa'
+                                        }}>
+                                          Short MA →
+                                        </div>
+                                        
+                                        {/* X-axis headers (short_ma values) */}
+                                        {shortValues.map(shortVal => (
+                                          <div key={`header-${shortVal}`} style={{ 
+                                            padding: '8px',
+                                            textAlign: 'center',
+                                            fontWeight: 'bold',
+                                            background: '#fafafa',
+                                            borderBottom: '2px solid #1890ff'
+                                          }}>
+                                            {shortVal}
+                                          </div>
+                                        ))}
+                                        
+                                        {/* Heatmap rows */}
+                                        {longValues.map(longVal => (
+                                          <React.Fragment key={`row-${longVal}`}>
+                                            {/* Y-axis header (long_ma value) */}
+                                            <div style={{ 
+                                              padding: '8px',
+                                              textAlign: 'center',
+                                              fontWeight: 'bold',
+                                              background: '#fafafa',
+                                              borderRight: '2px solid #1890ff'
+                                            }}>
+                                              {longVal}
+                                            </div>
+                                            
+                                            {/* Heatmap cells */}
+                                            {shortValues.map(shortVal => {
+                                              const result = resultMap.get(`${shortVal}_${longVal}`);
+                                              const hasResult = !!result;
+                                              const sharpe = hasResult ? result.sharpeRatio : 0;
+                                              
+                                              return (
+                                                <Tooltip
+                                                  key={`cell-${shortVal}-${longVal}`}
+                                                  title={hasResult ? (
+                                                    <div style={{ fontSize: '12px', color: '#000' }}>
+                                                      <div><strong>Parameters:</strong> Short MA={shortVal}, Long MA={longVal}</div>
+                                                      <div><strong>Sharpe Ratio:</strong> <span style={{ color: sharpe >= 0 ? '#52c41a' : '#ff4d4f' }}>{sharpe.toFixed(2)}</span></div>
+                                                      <div><strong>Total Return:</strong> <span style={{ color: result.totalReturn >= 0 ? '#52c41a' : '#ff4d4f' }}>{result.totalReturn >= 0 ? '+' : ''}{result.totalReturn.toFixed(2)}%</span></div>
+                                                      <div><strong>Max Drawdown:</strong> <span style={{ color: '#ff4d4f' }}>{result.maxDrawdown.toFixed(2)}%</span></div>
+                                                      <div><strong>Trades:</strong> {result.trades}</div>
+                                                    </div>
+                                                  ) : (
+                                                    <div style={{ color: '#000' }}>No data for Short MA={shortVal}, Long MA={longVal}</div>
+                                                  )}
+                                                  placement="top"
+                                                  color="white"
+                                                  overlayStyle={{ maxWidth: '300px' }}
+                                                >
+                                                  <div
+                                                    style={{
+                                                      width: '40px',
+                                                      height: '40px',
+                                                      background: hasResult ? getColor(sharpe) : '#f5f5f5',
+                                                      border: '1px solid #e8e8e8',
+                                                      borderRadius: '2px',
+                                                      cursor: hasResult ? 'pointer' : 'default',
+                                                      display: 'flex',
+                                                      alignItems: 'center',
+                                                      justifyContent: 'center',
+                                                      transition: 'transform 0.2s'
+                                                    }}
+                                                    onMouseEnter={(e) => {
+                                                      if (hasResult) {
+                                                        e.currentTarget.style.transform = 'scale(1.1)';
+                                                        e.currentTarget.style.zIndex = '1';
+                                                        e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.15)';
+                                                      }
+                                                    }}
+                                                    onMouseLeave={(e) => {
+                                                      if (hasResult) {
+                                                        e.currentTarget.style.transform = 'scale(1)';
+                                                        e.currentTarget.style.zIndex = '0';
+                                                        e.currentTarget.style.boxShadow = 'none';
+                                                      }
+                                                    }}
+                                                  >
+                                                    {hasResult && (
+                                                      <span style={{
+                                                        color: sharpe >= 0 ? '#000' : '#fff',
+                                                        fontWeight: 'bold',
+                                                        fontSize: '9px'
+                                                      }}>
+                                                        {sharpe.toFixed(1)}
+                                                      </span>
+                                                    )}
+                                                  </div>
+                                                </Tooltip>
+                                              );
+                                            })}
+                                          </React.Fragment>
+                                        ))}
+                                        
+                                        {/* Color legend */}
+                                        <div style={{ 
+                                          gridColumn: `1 / span ${shortValues.length + 1}`,
+                                          marginTop: '16px',
+                                          paddingTop: '16px',
+                                          borderTop: '1px solid #e8e8e8'
+                                        }}>
+                                          <div style={{ fontSize: '11px', color: '#666', marginBottom: '8px' }}>
+                                            Color Legend (Sharpe Ratio):
+                                          </div>
+                                          <div style={{ 
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: '8px',
+                                            fontSize: '10px'
+                                          }}>
+                                            <div style={{ display: 'flex', alignItems: 'center' }}>
+                                              <div style={{ width: '20px', height: '20px', background: 'rgb(255, 0, 0)', border: '1px solid #ccc' }}></div>
+                                              <span style={{ marginLeft: '4px' }}>Low ({minSharpe.toFixed(2)})</span>
+                                            </div>
+                                            <div style={{ display: 'flex', alignItems: 'center' }}>
+                                              <div style={{ width: '20px', height: '20px', background: 'rgb(255, 255, 0)', border: '1px solid #ccc' }}></div>
+                                              <span style={{ marginLeft: '4px' }}>Medium</span>
+                                            </div>
+                                            <div style={{ display: 'flex', alignItems: 'center' }}>
+                                              <div style={{ width: '20px', height: '20px', background: 'rgb(0, 255, 0)', border: '1px solid #ccc' }}></div>
+                                              <span style={{ marginLeft: '4px' }}>High ({maxSharpe.toFixed(2)})</span>
+                                            </div>
+                                            <div style={{ display: 'flex', alignItems: 'center', marginLeft: '16px' }}>
+                                              <div style={{ width: '20px', height: '20px', background: '#f5f5f5', border: '1px solid #ccc' }}></div>
+                                              <span style={{ marginLeft: '4px' }}>No data</span>
+                                            </div>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    );
+                                  })()}
+                                </div>
+                              </div>
+                              
+                              {/* Results Table */}
+                              <div style={{ marginBottom: '24px' }}>
+                                <h5 style={{ marginBottom: '16px' }}>Optimization Results</h5>
+                                <Table
+                                  dataSource={optimizationResult.results}
+                                  columns={[
+                                    {
+                                      title: 'Short MA',
+                                      dataIndex: 'short_ma',
+                                      key: 'short_ma',
+                                      width: 100,
+                                      sorter: (a: OptimizationResultItem, b: OptimizationResultItem) => a.short_ma - b.short_ma,
+                                    },
+                                    {
+                                      title: 'Long MA',
+                                      dataIndex: 'long_ma',
+                                      key: 'long_ma',
+                                      width: 100,
+                                      sorter: (a: OptimizationResultItem, b: OptimizationResultItem) => a.long_ma - b.long_ma,
+                                    },
+                                    {
+                                      title: 'Sharpe Ratio',
+                                      dataIndex: 'sharpeRatio',
+                                      key: 'sharpeRatio',
+                                      width: 120,
+                                      sorter: (a: OptimizationResultItem, b: OptimizationResultItem) => a.sharpeRatio - b.sharpeRatio,
+                                      defaultSortOrder: 'descend',
+                                      render: (value: number) => (
+                                        <span style={{ 
+                                          color: value >= 0 ? '#52c41a' : '#ff4d4f',
+                                          fontWeight: 'bold'
+                                        }}>
+                                          {value.toFixed(2)}
+                                        </span>
+                                      ),
+                                    },
+                                    {
+                                      title: 'Total Return',
+                                      dataIndex: 'totalReturn',
+                                      key: 'totalReturn',
+                                      width: 120,
+                                      sorter: (a: OptimizationResultItem, b: OptimizationResultItem) => a.totalReturn - b.totalReturn,
+                                      render: (value: number) => (
+                                        <span style={{ 
+                                          color: value >= 0 ? '#52c41a' : '#ff4d4f',
+                                          fontWeight: 'bold'
+                                        }}>
+                                          {value >= 0 ? '+' : ''}{value.toFixed(2)}%
+                                        </span>
+                                      ),
+                                    },
+                                    {
+                                      title: 'Max Drawdown',
+                                      dataIndex: 'maxDrawdown',
+                                      key: 'maxDrawdown',
+                                      width: 120,
+                                      sorter: (a: OptimizationResultItem, b: OptimizationResultItem) => a.maxDrawdown - b.maxDrawdown,
+                                      render: (value: number) => (
+                                        <span style={{ 
+                                          color: '#ff4d4f',
+                                          fontWeight: 'bold'
+                                        }}>
+                                          {value.toFixed(2)}%
+                                        </span>
+                                      ),
+                                    },
+                                    {
+                                      title: 'Trades',
+                                      dataIndex: 'trades',
+                                      key: 'trades',
+                                      width: 100,
+                                      sorter: (a: OptimizationResultItem, b: OptimizationResultItem) => a.trades - b.trades,
+                                      render: (value: number) => (
+                                        <span style={{ fontWeight: 'bold' }}>
+                                          {value}
+                                        </span>
+                                      ),
+                                    },
+                                  ]}
+                                  size="small"
+                                  pagination={{
+                                    pageSize: 10,
+                                    showSizeChanger: true,
+                                    showQuickJumper: true,
+                                    showTotal: (total) => `Total ${total} combinations`,
+                                  }}
+                                  rowKey={(record: OptimizationResultItem) => `${record.short_ma}_${record.long_ma}`}
+                                />
+                              </div>
+                              
+                              <Divider />
+                            </div>
+                          )}
+                          
+                          {/* Monthly Return Heatmap */}
+                {backtestResult?.results?.monthlyReturns && backtestResult.results.monthlyReturns.length > 0 && (
+                  <>
+                    <h4 style={{ marginTop: '32px', marginBottom: '16px' }}>Monthly Return Heatmap</h4>
+                    <div style={{ 
+                      background: 'white',
+                      borderRadius: '8px',
+                      padding: '16px',
+                      border: '1px solid #e8e8e8'
+                    }}>
+                      <div style={{ 
+                        display: 'grid',
+                        gridTemplateColumns: 'auto repeat(12, 1fr)',  // 13列：1列年份标签 + 12列月份
+                        gap: '8px',
+                        marginBottom: '16px'
+                      }}>
+                        {/* 第1行：空单元格（第1列） + 月份标题（第2-13列） */}
+                        <div style={{ 
+                          gridColumn: '1',
+                          textAlign: 'right',
+                          fontSize: '11px',
+                          fontWeight: '500',
+                          color: '#666',
+                          padding: '4px 8px 4px 0'
+                        }}>
+                          {/* 年份标签占位符 */}
+                        </div>
+                        
+                        {/* 月份标题（第2-13列） */}
+                        {['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'].map((month, index) => (
+                          <div 
+                            key={month}
+                            style={{ 
+                              textAlign: 'center', 
+                              fontSize: '11px',
+                              fontWeight: '500',
+                              color: '#666',
+                              padding: '4px 0',
+                              gridColumn: `${index + 2}`  // 从第2列开始
+                            }}
+                          >
+                            {month}
+                          </div>
+                        ))}
+                        
+                        {/* 年份行（第2行开始） */}
+                        {(() => {
+                          // Group monthly returns by year
+                          const returnsByYear: { [year: number]: any[] } = {};
+                          backtestResult.results.monthlyReturns.forEach(item => {
+                            if (!returnsByYear[item.year]) {
+                              returnsByYear[item.year] = new Array(12).fill(null);
+                            }
+                            returnsByYear[item.year][item.month - 1] = item;
+                          });
+                          
+                          // Get sorted years
+                          const years = Object.keys(returnsByYear).map(Number).sort();
+                          
+                          return years.map((year, rowIndex) => (
+                            <React.Fragment key={year}>
+                              {/* 年份标签（第1列） */}
+                              <div style={{ 
+                                gridColumn: '1',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'flex-end',
+                                fontSize: '12px',
+                                fontWeight: '500',
+                                color: '#666',
+                                paddingRight: '8px',
+                                gridRow: `${rowIndex + 2}`  // 从第2行开始
+                              }}>
+                                {year}
+                              </div>
+                              
+                              {/* 月份单元格（第2-13列） */}
+                              {returnsByYear[year].map((item, monthIndex) => {
+                                const month = monthIndex + 1;
+                                const returnValue = item?.return || 0;
+                                
+                                // Determine color based on return value - Standard heatmap colors
+                                let backgroundColor = '#f5f5f5'; // Default for no data
+                                let textColor = '#666';
+                                
+                                if (item) {
+                                  if (returnValue > 10) {
+                                    // > +10%: Dark green
+                                    backgroundColor = '#006400';
+                                    textColor = '#ffffff';
+                                  } else if (returnValue > 0) {
+                                    // 0~10%: Light green
+                                    backgroundColor = '#90ee90';
+                                    textColor = '#006400';
+                                  } else if (returnValue === 0) {
+                                    // 0%: Gray
+                                    backgroundColor = '#d3d3d3';
+                                    textColor = '#666';
+                                  } else if (returnValue > -10) {
+                                    // 0~-10%: Light red
+                                    backgroundColor = '#ffb6c1';
+                                    textColor = '#8b0000';
+                                  } else {
+                                    // < -10%: Dark red
+                                    backgroundColor = '#8b0000';
+                                    textColor = '#ffffff';
+                                  }
+                                }
+                                
+                                return (
+                                  <Tooltip 
+                                    key={`${year}-${month}`}
+                                    title={
+                                      <div style={{ textAlign: 'center' }}>
+                                        <div style={{ fontWeight: 'bold' }}>{item ? `${item.monthName} ${year}` : 'No data'}</div>
+                                        {item && (
+                                          <div>Return: {returnValue > 0 ? '+' : ''}{returnValue.toFixed(2)}%</div>
+                                        )}
+                                      </div>
+                                    }
+                                    placement="top"
+                                  >
+                                    <div
+                                      style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        height: '32px',
+                                        borderRadius: '4px',
+                                        backgroundColor,
+                                        color: textColor,
+                                        fontSize: '11px',
+                                        fontWeight: '500',
+                                        cursor: 'pointer',
+                                        transition: 'all 0.2s',
+                                        position: 'relative',
+                                        gridColumn: `${monthIndex + 2}`,  // 第2-13列
+                                        gridRow: `${rowIndex + 2}`        // 从第2行开始
+                                      }}
+                                      onMouseEnter={(e) => {
+                                        e.currentTarget.style.transform = 'scale(1.05)';
+                                        e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.1)';
+                                      }}
+                                      onMouseLeave={(e) => {
+                                        e.currentTarget.style.transform = 'scale(1)';
+                                        e.currentTarget.style.boxShadow = 'none';
+                                      }}
+                                    >
+                                      {item ? (
+                                        <>
+                                          <span>{returnValue > 0 ? '+' : ''}{returnValue.toFixed(2)}%</span>
+                                          <div style={{
+                                            position: 'absolute',
+                                            bottom: '2px',
+                                            left: '2px',
+                                            right: '2px',
+                                            height: '2px',
+                                            backgroundColor: returnValue > 0 ? '#52c41a' : returnValue < 0 ? '#ff4d4f' : '#d9d9d9',
+                                            borderRadius: '1px'
+                                          }} />
+                                        </>
+                                      ) : (
+                                        <span style={{ color: '#bfbfbf' }}>-</span>
+                                      )}
+                                    </div>
+                                  </Tooltip>
+                                );
+                              })}
+                            </React.Fragment>
+                          ));
+                        })()}
+                      </div>
+                      
+                      {/* Legend */}
+                      <div style={{ 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        justifyContent: 'center',
+                        gap: '12px',
+                        fontSize: '10px',
+                        color: '#666',
+                        marginTop: '8px',
+                        flexWrap: 'wrap'
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                          <div style={{ width: '10px', height: '10px', backgroundColor: '#006400', borderRadius: '2px' }}></div>
+                          <span>&gt; +10%</span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                          <div style={{ width: '10px', height: '10px', backgroundColor: '#90ee90', borderRadius: '2px' }}></div>
+                          <span>0% to +10%</span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                          <div style={{ width: '10px', height: '10px', backgroundColor: '#d3d3d3', borderRadius: '2px' }}></div>
+                          <span>0%</span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                          <div style={{ width: '10px', height: '10px', backgroundColor: '#ffb6c1', borderRadius: '2px' }}></div>
+                          <span>-10% to 0%</span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                          <div style={{ width: '10px', height: '10px', backgroundColor: '#8b0000', borderRadius: '2px' }}></div>
+                          <span>&lt; -10%</span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                          <div style={{ width: '10px', height: '10px', backgroundColor: '#f5f5f5', borderRadius: '2px', border: '1px solid #d9d9d9' }}></div>
+                          <span>No Data</span>
+                        </div>
+                      </div>
+                      
+                      {/* Summary statistics */}
+                      <div style={{ 
+                        marginTop: '16px',
+                        paddingTop: '16px',
+                        borderTop: '1px solid #f0f0f0',
+                        fontSize: '12px',
+                        color: '#666'
+                      }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                          <div style={{ display: 'flex', alignItems: 'flex-start' }}>
+                            <span style={{ minWidth: '140px', fontWeight: '500' }}>最佳月份:</span>
+                            <strong style={{ color: '#3f8600' }}>
+                              {(() => {
+                                if (!backtestResult.results.monthlyReturns || backtestResult.results.monthlyReturns.length === 0) {
+                                  return 'N/A';
+                                }
+                                // Find best month (highest return)
+                                const bestMonth = backtestResult.results.monthlyReturns.reduce((best, current) => {
+                                  return current.return > best.return ? current : best;
+                                });
+                                return `${bestMonth.monthName} ${bestMonth.year}: +${bestMonth.return.toFixed(2)}%`;
+                              })()}
+                            </strong>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'flex-start' }}>
+                            <span style={{ minWidth: '140px', fontWeight: '500' }}>最差月份:</span>
+                            <strong style={{ color: '#cf1322' }}>
+                              {(() => {
+                                if (!backtestResult.results.monthlyReturns || backtestResult.results.monthlyReturns.length === 0) {
+                                  return 'N/A';
+                                }
+                                // Find worst month (lowest return) - use explicit comparison
+                                const worstMonth = backtestResult.results.monthlyReturns.reduce((worst, current) => {
+                                  return current.return < worst.return ? current : worst;
+                                });
+                                return `${worstMonth.monthName} ${worstMonth.year}: ${worstMonth.return.toFixed(2)}%`;
+                              })()}
+                            </strong>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'flex-start' }}>
+                            <span style={{ minWidth: '140px', fontWeight: '500' }}>平均月收益率:</span>
+                            <strong>
+                              {(() => {
+                                if (!backtestResult.results.monthlyReturns || backtestResult.results.monthlyReturns.length === 0) {
+                                  return 'N/A';
+                                }
+                                const avgReturn = backtestResult.results.monthlyReturns
+                                  .reduce((sum, item) => sum + item.return, 0) / backtestResult.results.monthlyReturns.length;
+                                const color = avgReturn > 0 ? '#3f8600' : avgReturn < 0 ? '#cf1322' : '#666';
+                                return <span style={{ color }}>{avgReturn > 0 ? '+' : ''}{avgReturn.toFixed(2)}%</span>;
+                              })()}
+                            </strong>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {/* Rolling Sharpe Ratio */}
+                {backtestResult?.results?.rollingSharpeRatio && backtestResult.results.rollingSharpeRatio.length > 0 && (
+                  <>
+                    <h4 style={{ marginTop: '32px', marginBottom: '16px' }}>Rolling Sharpe Ratio (30-day)</h4>
+                    <div style={{ 
+                      height: '200px', 
+                      background: 'white',
+                      borderRadius: '8px',
+                      padding: '16px',
+                      border: '1px solid #e8e8e8'
+                    }}>
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart
+                          data={backtestResult.results.rollingSharpeRatio}
+                          margin={{ top: 5, right: 5, left: 5, bottom: 5 }}
+                        >
+                          <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                          <XAxis 
+                            dataKey="date" 
+                            tick={{ fontSize: 10 }}
+                            tickFormatter={(value) => {
+                              // Format date to show only month/day for better readability
+                              try {
+                                const date = new Date(value);
+                                return `${date.getMonth() + 1}/${date.getDate()}`;
+                              } catch {
+                                return value;
+                              }
+                            }}
+                          />
+                          <YAxis 
+                            tick={{ fontSize: 10 }}
+                            tickFormatter={(value) => value.toFixed(2)}
+                            label={{ 
+                              value: 'Sharpe Ratio', 
+                              angle: -90, 
+                              position: 'insideLeft',
+                              style: { fontSize: '11px', fill: '#666' }
+                            }}
+                          />
+                          <RechartsTooltip 
+                            formatter={(value, name) => {
+                              if (name === 'sharpe') return [Number(value).toFixed(3), 'Sharpe Ratio'];
+                              return [value, name];
+                            }}
+                            labelFormatter={(label) => `Date: ${label}`}
+                          />
+                          <Line
+                            type="monotone"
+                            dataKey="sharpe"
+                            stroke="#1890ff"
+                            strokeWidth={2}
+                            dot={false}
+                            activeDot={{ r: 4, strokeWidth: 1 }}
+                            name="sharpe"
+                          />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </>
+                )}
+
+                {/* Equity Curve */}
+                <h4 style={{ marginTop: '32px', marginBottom: '16px' }}>Equity Curve</h4>
+                {equityCurveData.length > 0 ? (
+                  <div style={{ 
+                    height: '150px', 
+                    background: '#fafafa',
+                    borderRadius: '8px',
+                    padding: '16px',
+                    position: 'relative'
+                  }}>
+                    <div style={{ 
+                      display: 'flex', 
+                      alignItems: 'flex-end', 
+                      height: '100px',
+                      justifyContent: 'space-between',
+                      marginBottom: '8px'
+                    }}>
+                      {equityCurveData.map((point, index) => {
+                        const prices = equityCurveData.map(p => p.equity);
+                        const maxPrice = Math.max(...prices);
+                        const minPrice = Math.min(...prices);
+                        const price = point.equity;
+                        const heightPercent = ((price - minPrice) / (maxPrice - minPrice)) * 100;
+                        
+                        return (
+                          <div
+                            key={index}
+                            style={{
+                              width: '8%',
+                              height: `${Math.max(heightPercent, 5)}%`,
+                              backgroundColor: price >= equityCurveData[0].equity ? '#3f8600' : '#cf1322',
+                              borderRadius: '2px',
+                              position: 'relative'
+                            }}
+                            title={`${point.date}: $${safeToFixed(price, 2)}`}
+                          />
+                        );
+                      })}
+                    </div>
+                    
+                    <div style={{ 
+                      display: 'flex', 
+                      justifyContent: 'space-between',
+                      fontSize: '10px',
+                      color: '#666'
+                    }}>
+                      <span>{equityCurveData[0]?.date || 'Start'}</span>
+                      <span>Equity Curve</span>
+                      <span>{equityCurveData[equityCurveData.length - 1]?.date || 'End'}</span>
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ textAlign: 'center', padding: '40px', color: '#999' }}>
+                    No equity curve data available
+                  </div>
+                )}
+
+                {/* Drawdown Chart */}
+                <h4 style={{ marginTop: '32px', marginBottom: '16px' }}>Drawdown Chart</h4>
+                <DrawdownChart 
+                  data={drawdownData}
+                  equityData={equityCurveData}  // 传递 equity 数据用于 tooltip
+                  height={200}
+                />
+
+                {/* Trade Log */}
+                {backtestResult?.results?.tradesList && backtestResult.results.tradesList.length > 0 && (
+                  <>
+                    <h4 style={{ marginTop: '32px', marginBottom: '16px' }}>Trade Log</h4>
+                    <TradeLogTable data={backtestResult.results.tradesList} />
+                  </>
+                )}
+                        </>
+                      ),
+                    },
+                    {
+                      key: 'chart',
+                      label: 'Trading Chart',
+                      children: backtestResult?.results?.chartData ? (
+                        <TradingChart
+                          data={backtestResult.results.chartData}
+                          height={500}
+                          parameters={{
+                            strategy: backtestResult.parameters?.strategy,
+                            symbol: backtestResult.parameters?.symbols?.[0],
+                            period: backtestResult.parameters?.period,
+                            initialCapital: backtestResult.parameters?.initialCapital
+                          }}
+                        />
+                      ) : (
+                        <Empty 
+                          description="No chart data available" 
+                          image={Empty.PRESENTED_IMAGE_SIMPLE}
+                          style={{ padding: '40px 0' }}
+                        />
+                      ),
+                    },
+                  ]}
+                />
+                
+                <Divider />
+                
+                <h4>Parameters</h4>
+                <Row gutter={16}>
+                  <Col span={6}>
+                    <div><strong>Strategy:</strong> {backtestResult.parameters?.strategy || 'Unknown'}</div>
+                  </Col>
+                  <Col span={6}>
+                    <div><strong>Symbols:</strong> {backtestResult.parameters?.symbols?.join(', ') || 'Unknown'}</div>
+                  </Col>
+                  <Col span={6}>
+                    <div><strong>Period:</strong> {backtestResult.parameters?.period || 'Unknown'}</div>
+                  </Col>
+                  <Col span={6}>
+                    <div><strong>Initial Capital:</strong> ${safeNumber(backtestResult.parameters?.initialCapital).toLocaleString()}</div>
+                  </Col>
+                </Row>
+              </Card>
+            </div>
+          )}
+        </Col>
+        
+        <Col span={8}>
+          <Card 
+            title="Recent Backtests" 
+            extra={
+              <Space>
+                {selectedBacktests.length > 0 && (
+                  <Button 
+                    type="primary" 
+                    size="small"
+                    onClick={() => {
+                      if (selectedBacktests.length > 0) {
+                        navigate(`/compare?ids=${selectedBacktests.join(',')}`);
+                      } else {
+                        message.warning('Please select at least one backtest to compare');
+                      }
+                    }}
+                  >
+                    Compare ({selectedBacktests.length})
+                  </Button>
+                )}
+                <Button 
+                  type="text" 
+                  icon={<ReloadOutlined />} 
+                  onClick={fetchBacktestHistory}
+                  loading={historyLoading}
+                  size="small"
+                />
+              </Space>
+            }
+          >
+            {historyLoading ? (
+              <div style={{ textAlign: 'center', padding: '40px' }}>
+                <Spin />
+              </div>
+            ) : backtestHistory.length > 0 ? (
+              <Table
+                columns={historyColumns}
+                dataSource={backtestHistory}
+                rowKey="backtestId"
+                pagination={{ pageSize: 5, simple: true }}
+                size="small"
+                scroll={{ y: 300 }}
+              />
+            ) : (
+              <Empty
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+                description="No backtest history yet"
+              >
+                <Button type="primary" onClick={() => {
+                  form.setFieldsValue({
+                    symbol: 'AAPL',
+                    strategy: 'moving_average',
+                    initialCapital: 100000,
+                    dateRange: defaultDateRange()
+                  });
+                  message.info('AAPL example loaded');
+                }}>
+                  Try AAPL Example
+                </Button>
+              </Empty>
+            )}
+          </Card>
+          
+          <Card title="Quick Actions" style={{ marginTop: 16 }}>
+            <Space direction="vertical" style={{ width: '100%' }}>
+              <Button 
+                type="default" 
+                block
+                onClick={() => navigate('/market')}
+                icon={<LineChartOutlined />}
+              >
+                Browse Market
+              </Button>
+              <Button 
+                type="default" 
+                block
+                onClick={() => {
+                  form.setFieldsValue({
+                    symbol: 'AAPL',
+                    strategy: 'moving_average',
+                    initialCapital: 100000,
+                    dateRange: defaultDateRange()
+                  });
+                  message.info('AAPL example loaded');
+                }}
+              >
+                Load AAPL Example
+              </Button>
+              <Button 
+                type="default" 
+                block
+                onClick={() => {
+                  form.setFieldsValue({
+                    symbol: 'MSFT',
+                    strategy: 'rsi',
+                    initialCapital: 50000,
+                    dateRange: defaultDateRange()
+                  });
+                  message.info('MSFT example loaded');
+                }}
+              >
+                Load MSFT Example
+              </Button>
+              <Button 
+                type="default" 
+                block
+                onClick={() => {
+                  form.setFieldsValue({
+                    symbol: 'TSLA',
+                    strategy: 'momentum',
+                    initialCapital: 75000,
+                    dateRange: defaultDateRange()
+                  });
+                  message.info('TSLA example loaded');
+                }}
+              >
+                Load TSLA Example
+              </Button>
+            </Space>
+          </Card>
+        </Col>
+      </Row>
+    </div>
+  );
+};
+
+export default Backtest;

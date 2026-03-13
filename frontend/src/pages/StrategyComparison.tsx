@@ -4,6 +4,7 @@ import { Card, Table, Tag, Button, Spin, Alert, Empty, Row, Col, Statistic, Divi
 import { ArrowLeftOutlined, LineChartOutlined } from '@ant-design/icons';
 import { backtraderAPI } from '../services/api';
 import TradingChart from '../components/TradingChart';
+import { useLanguage } from '../contexts/LanguageContext';
 
 // Helper functions (copied from Backtest.tsx)
 const safeToFixed = (value: any, decimals: number = 2): string => {
@@ -75,33 +76,41 @@ interface BacktestResult {
 }
 
 const StrategyComparison: React.FC = () => {
+  const { t } = useLanguage();
   const location = useLocation();
   const navigate = useNavigate();
   
   const [loading, setLoading] = useState(true);
   const [backtestResults, setBacktestResults] = useState<BacktestResult[]>([]);
   const [error, setError] = useState<string | null>(null);
-
-  // Get backtest IDs from URL query parameter
-  const queryParams = new URLSearchParams(location.search);
-  const backtestIds = queryParams.get('ids')?.split(',') || [];
+  const [isEmptyState, setIsEmptyState] = useState(false);
 
   useEffect(() => {
+    // Parse backtest IDs from URL query parameter
+    const queryParams = new URLSearchParams(location.search);
+    const backtestIds = queryParams.get('ids')?.split(',').filter(id => id.trim() !== '') || [];
+    
     if (backtestIds.length > 0) {
-      fetchBacktestResults();
+      setIsEmptyState(false);
+      setError(null);
+      fetchBacktestResults(backtestIds);
     } else {
-      setError('No backtests selected for comparison');
+      setIsEmptyState(true);
+      setError(null);
       setLoading(false);
     }
   }, [location.search]);
 
-  const fetchBacktestResults = async () => {
+  const fetchBacktestResults = async (backtestIds: string[]) => {
     setLoading(true);
     setError(null);
+    setIsEmptyState(false);
+    console.log('4. fetchBacktestResults 实际收到的 backtestIds:', backtestIds);
     
     try {
       // Get all backtests from history
       const historyResponse = await backtraderAPI.getBacktestHistory();
+      
       if (historyResponse.data && Array.isArray(historyResponse.data)) {
         const history = historyResponse.data;
         
@@ -111,7 +120,8 @@ const StrategyComparison: React.FC = () => {
         );
         
         if (selectedResults.length === 0) {
-          setError('No matching backtests found in history');
+          setIsEmptyState(true);
+          setError(null);
         } else {
           setBacktestResults(selectedResults);
           
@@ -146,10 +156,10 @@ const StrategyComparison: React.FC = () => {
           console.log('=== END DEBUG ===');
         }
       } else {
-        setError('Failed to load backtest history');
+        setError(t.comparison.failedToLoadHistory);
       }
     } catch (err: any) {
-      setError(err.message || 'Failed to load backtest results');
+      setError(err.message || t.comparison.failedToLoadResults);
     } finally {
       setLoading(false);
     }
@@ -158,7 +168,7 @@ const StrategyComparison: React.FC = () => {
   // Generate comparison data for parameters table
   const parameterColumns = [
     {
-      title: 'Parameter',
+      title: t.comparison.parameter || 'Parameter',
       dataIndex: 'parameter',
       key: 'parameter',
       width: 150,
@@ -229,7 +239,7 @@ const StrategyComparison: React.FC = () => {
   // Generate comparison data for metrics table
   const metricColumns = [
     {
-      title: 'Metric',
+      title: t.comparison.metric || 'Metric',
       dataIndex: 'metric',
       key: 'metric',
       width: 180,
@@ -415,7 +425,35 @@ const StrategyComparison: React.FC = () => {
     return (
       <div style={{ padding: '40px', textAlign: 'center' }}>
         <Spin size="large" />
-        <div style={{ marginTop: '16px', color: '#666' }}>Loading comparison data...</div>
+        <div style={{ marginTop: '16px', color: '#666' }}>{t.comparison.loadingBacktestResults}</div>
+      </div>
+    );
+  }
+
+  if (isEmptyState) {
+    return (
+      <div style={{ padding: '24px' }}>
+        <Card style={{ textAlign: 'center', padding: '40px 0' }}>
+          <Empty
+            description={
+              <div>
+                <div style={{ fontSize: '16px', marginBottom: '8px', fontWeight: '500' }}>
+                  {t.comparison.noBacktestsSelected}
+                </div>
+                <div style={{ fontSize: '14px', color: '#666', marginBottom: '16px' }}>
+                  {t.comparison.selectBacktestsPrompt}
+                </div>
+                <Button 
+                  type="primary" 
+                  onClick={() => navigate('/backtest')}
+                >
+                  {t.comparison.goToBacktestPage}
+                </Button>
+              </div>
+            }
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+          />
+        </Card>
       </div>
     );
   }
@@ -430,7 +468,7 @@ const StrategyComparison: React.FC = () => {
           showIcon
           action={
             <Button type="primary" onClick={() => navigate('/backtest')}>
-              Go to Backtest Page
+              {t.comparison.goToBacktestPage}
             </Button>
           }
         />
@@ -450,7 +488,7 @@ const StrategyComparison: React.FC = () => {
           onClick={() => navigate('/backtest')}
           style={{ marginTop: '16px' }}
         >
-          Go to Backtest Page
+          {t.comparison.goToBacktestPage}
         </Button>
       </div>
     );
@@ -485,12 +523,12 @@ const StrategyComparison: React.FC = () => {
           onClick={() => navigate('/backtest')}
           style={{ marginBottom: '16px' }}
         >
-          Back to Backtest
+          {t.backtest.backToBacktest}
         </Button>
         
-        <h1 style={{ marginBottom: '8px' }}>Strategy Comparison</h1>
+        <h1 style={{ marginBottom: '8px' }}>{t.comparison.title}</h1>
         <div style={{ color: '#666', fontSize: '14px' }}>
-          Comparing {backtestResults.length} backtest{backtestResults.length > 1 ? 's' : ''}
+          {t.comparison.subtitle}
         </div>
       </div>
 
@@ -536,7 +574,7 @@ const StrategyComparison: React.FC = () => {
       </Row>
 
       {/* Parameters Comparison */}
-      <Card title="Parameters Comparison" style={{ marginBottom: '24px' }}>
+      <Card title={t.comparison.parameterComparison} style={{ marginBottom: '24px' }}>
         <Table
           columns={parameterColumns}
           dataSource={parameterData}
@@ -547,7 +585,7 @@ const StrategyComparison: React.FC = () => {
       </Card>
 
       {/* Metrics Comparison */}
-      <Card title="Performance Metrics Comparison" style={{ marginBottom: '24px' }}>
+      <Card title={t.comparison.performanceComparison} style={{ marginBottom: '24px' }}>
         <Table
           columns={metricColumns}
           dataSource={metricData}
@@ -562,7 +600,7 @@ const StrategyComparison: React.FC = () => {
         title={
           <span>
             <LineChartOutlined style={{ marginRight: '8px' }} />
-            Equity Curve Comparison (Normalized to 100% = Initial Capital)
+            {t.comparison.equityCurveComparison} (Normalized to 100% = Initial Capital)
           </span>
         }
         style={{ marginBottom: '24px' }}
@@ -795,7 +833,7 @@ const StrategyComparison: React.FC = () => {
           </div>
         ) : (
           <Empty 
-            description="No equity curve data available for comparison" 
+            description={t.comparison.noEquityCurveData || "No equity curve data available for comparison"} 
             image={Empty.PRESENTED_IMAGE_SIMPLE}
             style={{ padding: '40px 0' }}
           />
@@ -806,10 +844,17 @@ const StrategyComparison: React.FC = () => {
       <div style={{ textAlign: 'center', marginTop: '24px' }}>
         <Button 
           type="primary" 
-          onClick={fetchBacktestResults}
+          onClick={() => {
+            // Re-parse backtestIds from URL when refreshing
+            const queryParams = new URLSearchParams(location.search);
+            const currentBacktestIds = queryParams.get('ids')?.split(',').filter(id => id.trim() !== '') || [];
+            if (currentBacktestIds.length > 0) {
+              fetchBacktestResults(currentBacktestIds);
+            }
+          }}
           loading={loading}
         >
-          Refresh Comparison
+          {t.common.refresh}
         </Button>
       </div>
     </div>

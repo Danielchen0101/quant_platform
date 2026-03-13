@@ -754,91 +754,330 @@ const Backtest: React.FC = () => {
                   defaultActiveKey="results"
                   items={[
                     {
-                      key: 'results',
-                      label: 'Results Table',
+ key: 'results',
+ label: 'Overview',
+ children: (
+ <>
+ {/* Performance Summary Cards */}
+ {backtestResult?.results && (
+ <div style={{ marginBottom: '24px' }}>
+ <h4 style={{ margin: '0 0 16px 0' }}>Performance Summary</h4>
+ <Row gutter={[16, 16]}>
+ <Col span={8}>
+ <Card size="small" style={{ textAlign: 'center' }}>
+ <Statistic
+ title="Total Return"
+ value={backtestResult.results.totalReturn || 0}
+ precision={2}
+ suffix="%"
+ valueStyle={{
+ color: (backtestResult.results.totalReturn || 0) >= 0 ? '#3f8600' : '#cf1322',
+ fontWeight: 'bold'
+ }}
+ />
+ </Card>
+ </Col>
+
+ <Col span={8}>
+ <Card size="small" style={{ textAlign: 'center' }}>
+ <Statistic
+ title="Annualized Return"
+ value={backtestResult.results.annualizedReturn || 0}
+ precision={2}
+ suffix="%"
+ valueStyle={{
+ color: (backtestResult.results.annualizedReturn || 0) >= 0 ? '#3f8600' : '#cf1322',
+ fontWeight: 'bold'
+ }}
+ />
+ </Card>
+ </Col>
+
+ <Col span={8}>
+ <Card size="small" style={{ textAlign: 'center' }}>
+ <Statistic
+ title="Sharpe Ratio"
+ value={backtestResult.results.sharpeRatio || 0}
+ precision={2}
+ valueStyle={{
+ color:
+ (backtestResult.results.sharpeRatio || 0) >= 1
+ ? '#3f8600'
+ : (backtestResult.results.sharpeRatio || 0) >= 0
+ ? '#fa8c16'
+ : '#cf1322',
+ fontWeight: 'bold'
+ }}
+ />
+ </Card>
+ </Col>
+
+ <Col span={8}>
+ <Card size="small" style={{ textAlign: 'center' }}>
+ <Statistic
+ title="Max Drawdown"
+ value={backtestResult.results.maxDrawdown || 0}
+ precision={2}
+ suffix="%"
+ valueStyle={{
+ color: '#cf1322',
+ fontWeight: 'bold'
+ }}
+ />
+ </Card>
+ </Col>
+
+ <Col span={8}>
+ <Card size="small" style={{ textAlign: 'center' }}>
+ <Statistic
+ title="Win Rate"
+ value={backtestResult.results.winRate || 0}
+ precision={1}
+ suffix="%"
+ valueStyle={{
+ color:
+ (backtestResult.results.winRate || 0) >= 60
+ ? '#3f8600'
+ : (backtestResult.results.winRate || 0) >= 40
+ ? '#fa8c16'
+ : '#cf1322',
+ fontWeight: 'bold'
+ }}
+ />
+ </Card>
+ </Col>
+
+ <Col span={8}>
+ <Card size="small" style={{ textAlign: 'center' }}>
+ <Statistic
+ title="Profit Factor"
+ value={backtestResult.results.profitFactor || 0}
+ precision={2}
+ valueStyle={{
+ color:
+ (backtestResult.results.profitFactor || 0) >= 1.5
+ ? '#3f8600'
+ : (backtestResult.results.profitFactor || 0) >= 1
+ ? '#fa8c16'
+ : '#cf1322',
+ fontWeight: 'bold'
+ }}
+ />
+ </Card>
+ </Col>
+ </Row>
+ </div>
+ )}
+
+ <Divider />
+
+ <Table
+ columns={resultColumns}
+ dataSource={resultData}
+ pagination={false}
+ size="small"
+ />
+
+
+ </>
+ ),
+},
+                    {
+                      key: 'charts',
+                      label: 'Charts',
                       children: (
                         <>
-                          <Table
-                            columns={resultColumns}
-                            dataSource={resultData}
-                            pagination={false}
-                            size="small"
-                          />
-                          
-                          <Divider />
-                          
                           <h4>Equity Curve</h4>
-                {equityCurveData.length > 0 ? (
-                  <div style={{ 
-                    height: '150px', 
-                    background: '#fafafa',
-                    borderRadius: '8px',
-                    padding: '16px',
-                    position: 'relative'
-                  }}>
-                    <div style={{ 
-                      display: 'flex', 
-                      alignItems: 'flex-end', 
-                      height: '100px',
-                      justifyContent: 'space-between',
-                      marginBottom: '8px'
-                    }}>
-                      {equityCurveData.map((point, index) => {
-                        const prices = equityCurveData.map(p => p.equity);
-                        const maxPrice = Math.max(...prices);
-                        const minPrice = Math.min(...prices);
-                        const price = point.equity;
-                        const heightPercent = ((price - minPrice) / (maxPrice - minPrice)) * 100;
-                        
-                        return (
-                          <div
-                            key={index}
-                            style={{
-                              width: '8%',
-                              height: `${Math.max(heightPercent, 5)}%`,
-                              backgroundColor: price >= equityCurveData[0].equity ? '#3f8600' : '#cf1322',
-                              borderRadius: '2px',
-                              position: 'relative'
-                            }}
-                            title={`${point.date}: $${safeToFixed(price, 2)}`}
-                          />
-                        );
-                      })}
-                    </div>
-                    
-                    <div style={{ 
-                      display: 'flex', 
-                      justifyContent: 'space-between',
-                      fontSize: '10px',
-                      color: '#666'
-                    }}>
-                      <span>{equityCurveData[0]?.date || 'Start'}</span>
-                      <span>Equity Curve</span>
-                      <span>{equityCurveData[equityCurveData.length - 1]?.date || 'End'}</span>
-                    </div>
-                  </div>
-                ) : (
-                  <div style={{ textAlign: 'center', padding: '40px', color: '#999' }}>
-                    No equity curve data available
-                  </div>
-                )}
+                          {equityCurveData.length > 0 ? (
+                            <div
+                              style={{
+                                height: '150px',
+                                background: '#fafafa',
+                                borderRadius: '8px',
+                                padding: '16px',
+                                position: 'relative'
+                              }}
+                            >
+                              <div
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'flex-end',
+                                  height: '100px',
+                                  justifyContent: 'space-between',
+                                  marginBottom: '8px'
+                                }}
+                              >
+                                {equityCurveData.map((point, index) => {
+                                  const prices = equityCurveData.map((p) => p.equity);
+                                  const maxPrice = Math.max(...prices);
+                                  const minPrice = Math.min(...prices);
+                                  const range = maxPrice - minPrice;
+                                  const price = point.equity;
+                                  const heightPercent = range === 0 ? 50 : ((price - minPrice) / range) * 100;
+
+                                  return (
+                                    <div
+                                      key={index}
+                                      style={{
+                                        width: '8%',
+                                        height: `${Math.max(heightPercent, 5)}%`,
+                                        backgroundColor: price >= equityCurveData[0].equity ? '#3f8600' : '#cf1322',
+                                        borderRadius: '2px',
+                                        position: 'relative'
+                                      }}
+                                      title={`${point.date}: $${safeToFixed(price, 2)}`}
+                                    />
+                                  );
+                                })}
+                              </div>
+
+                              <div
+                                style={{
+                                  display: 'flex',
+                                  justifyContent: 'space-between',
+                                  fontSize: '10px',
+                                  color: '#666'
+                                }}
+                              >
+                                <span>{equityCurveData[0]?.date || 'Start'}</span>
+                                <span>Equity Curve</span>
+                                <span>{equityCurveData[equityCurveData.length - 1]?.date || 'End'}</span>
+                              </div>
+                            </div>
+                          ) : (
+                            <div style={{ textAlign: 'center', padding: '40px', color: '#999' }}>
+                              No equity curve data available
+                            </div>
+                          )}
+
+                          <Divider />
+
+                          <h4>Drawdown Chart</h4>
+                          {equityCurveData.length > 0 ? (
+                            <div
+                              style={{
+                                height: '150px',
+                                background: '#fafafa',
+                                borderRadius: '8px',
+                                padding: '16px',
+                                position: 'relative'
+                              }}
+                            >
+                              {/* 计算最大回撤数据 */}
+                              {(() => {
+                                // 计算每个点的回撤
+                                const drawdownData: Array<{date: string, drawdown: number, equity: number, peak: number}> = [];
+                                let peak = equityCurveData[0].equity;
+                                
+                                for (let i = 0; i < equityCurveData.length; i++) {
+                                  const currentEquity = equityCurveData[i].equity;
+                                  peak = Math.max(peak, currentEquity);
+                                  const drawdown = ((peak - currentEquity) / peak) * 100;
+                                  drawdownData.push({
+                                    date: equityCurveData[i].date,
+                                    drawdown: drawdown,
+                                    equity: currentEquity,
+                                    peak: peak
+                                  });
+                                }
+                                
+                                // 找到最大回撤
+                                const maxDrawdown = Math.max(...drawdownData.map(d => d.drawdown));
+                                const maxDrawdownPoint = drawdownData.find(d => d.drawdown === maxDrawdown);
+                                
+                                // 计算最大回撤值（避免在 map 内部重复计算）
+                                const maxDrawdownValue = Math.max(...drawdownData.map(d => d.drawdown));
+                                
+                                return (
+                                  <>
+                                    <div
+                                      style={{
+                                        display: 'flex',
+                                        alignItems: 'flex-start',
+                                        height: '100px',
+                                        justifyContent: 'space-between',
+                                        marginBottom: '8px',
+                                        borderTop: '1px solid #ddd'
+                                      }}
+                                    >
+                                      {drawdownData.map((point, index) => {
+                                        const drawdownPercent = maxDrawdownValue === 0 ? 0 : (point.drawdown / maxDrawdownValue) * 100;
+                                        
+                                        return (
+                                          <div
+                                            key={index}
+                                            style={{
+                                              width: `${100 / drawdownData.length}%`,
+                                              height: point.drawdown === 0 ? '0%' : `${Math.max(drawdownPercent, 5)}%`,
+                                              backgroundColor: '#cf1322',
+                                              borderRadius: '0 0 2px 2px',
+                                              position: 'relative'
+                                            }}
+                                            title={`${point.date}: ${safeToFixed(point.drawdown, 2)}% drawdown`}
+                                          />
+                                        );
+                                      })}
+                                    </div>
+                                    
+                                    <div
+                                      style={{
+                                        display: 'flex',
+                                        justifyContent: 'space-between',
+                                        fontSize: '10px',
+                                        color: '#666'
+                                      }}
+                                    >
+                                      <span>{equityCurveData[0]?.date || 'Start'}</span>
+                                      <span>
+                                        Max Drawdown: <strong style={{ color: '#cf1322' }}>{safeToFixed(maxDrawdown, 2)}%</strong>
+                                        {maxDrawdownPoint && ` (${maxDrawdownPoint.date})`}
+                                      </span>
+                                      <span>{equityCurveData[equityCurveData.length - 1]?.date || 'End'}</span>
+                                    </div>
+                                  </>
+                                );
+                              })()}
+                            </div>
+                          ) : (
+                            <div style={{ textAlign: 'center', padding: '40px', color: '#999' }}>
+                              No drawdown data available
+                            </div>
+                          )}
+
+                          <Divider />
+
+                          <h4>Trading Chart</h4>
+                          {backtestResult?.results?.chartData ? (
+                            <TradingChart
+                              data={backtestResult.results.chartData}
+                              height={400}
+                            />
+                          ) : (
+                            <Empty 
+                              description="No chart data available" 
+                              image={Empty.PRESENTED_IMAGE_SIMPLE}
+                              style={{ padding: '40px 0' }}
+                            />
+                          )}
                         </>
                       ),
                     },
                     {
-                      key: 'chart',
-                      label: 'Trading Chart',
-                      children: backtestResult?.results?.chartData ? (
-                        <TradingChart
-                          data={backtestResult.results.chartData}
-                          height={500}
-                        />
-                      ) : (
-                        <Empty 
-                          description="No chart data available" 
-                          image={Empty.PRESENTED_IMAGE_SIMPLE}
-                          style={{ padding: '40px 0' }}
-                        />
+                      key: 'trades',
+                      label: 'Trades',
+                      children: (
+                        <div style={{ padding: '40px', textAlign: 'center', color: '#999' }}>
+                          Trade log will be displayed here
+                        </div>
+                      ),
+                    },
+                    {
+                      key: 'parameters',
+                      label: 'Parameters',
+                      children: (
+                        <div style={{ padding: '40px', textAlign: 'center', color: '#999' }}>
+                          Strategy parameters will be displayed here
+                        </div>
                       ),
                     },
                   ]}

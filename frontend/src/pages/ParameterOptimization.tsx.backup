@@ -1,0 +1,792 @@
+import React, { useState, useEffect } from 'react';
+import { Card, Form, Input, InputNumber, Button, Select, Table, Tag, Alert, Space, Spin, Statistic, Row, Col, Tooltip } from 'antd';
+import { LineChartOutlined, RocketOutlined, TrophyOutlined, BarChartOutlined } from '@ant-design/icons';
+import { backtraderAPI } from '../services/api';
+import { useLanguage } from '../contexts/LanguageContext';
+
+// Helper functions
+const safeNumber = (value: any): number => {
+  if (value === null || value === undefined || value === '') return 0;
+  const num = Number(value);
+  return isNaN(num) ? 0 : num;
+};
+
+const formatPercent = (value: number): string => {
+  const safeValue = safeNumber(value);
+  const sign = safeValue >= 0 ? '+' : '';
+  return `${sign}${safeValue.toFixed(2)}%`;
+};
+
+interface OptimizationResult {
+  rank: number;
+  short_ma: number;
+  long_ma: number;
+  totalReturn: number;
+  annualizedReturn: number;
+  sharpeRatio: number;
+  maxDrawdown: number;
+  trades: number;
+  winRate?: number;
+  profitLoss?: number;
+  volatility?: number;
+  sortinoRatio?: number;
+  profitFactor?: number;
+  expectancy?: number;
+  exposure?: number;
+}
+
+const ParameterOptimization: React.FC = () => {
+  const { t } = useLanguage();
+  const [form] = Form.useForm();
+  const [loading, setLoading] = useState(false);
+  const [optimizationResults, setOptimizationResults] = useState<OptimizationResult[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [stats, setStats] = useState({
+    totalCombinations: 0,
+    validCombinations: 0,
+    bestReturn: 0,
+    worstReturn: 0,
+    avgReturn: 0
+  });
+
+  // Default form values
+  useEffect(() => {
+    form.setFieldsValue({
+      symbol: 'AAPL',
+      strategy: 'moving_average',
+      fast_mas: [5, 10, 20],
+      slow_mas: [50, 100, 200],
+      period: '1y',
+      initial_capital: 100000
+    });
+  }, [form]);
+
+  const handleRunOptimization = async (values: any) => {
+    setLoading(true);
+    setError(null);
+    
+    // Convert form values to new API payload format
+    // Old format: fast_mas: [5, 10, 20], slow_mas: [50, 100, 200]
+    // New format: parameters.short_ma: {min, max, step}, parameters.long_ma: {min, max, step}
+    
+    // Extract values from arrays
+    const fast_mas_int = Array.isArray(values.fast_mas) 
+      ? values.fast_mas.map((v: any) => parseInt(v, 10)).filter((v: number) => !isNaN(v))
+      : [5, 10, 20];
+    
+    const slow_mas_int = Array.isArray(values.slow_mas)
+      ? values.slow_mas.map((v: any) => parseInt(v, 10)).filter((v: number) => !isNaN(v))
+      : [50, 100, 200];
+    
+    // Calculate min, max, step from arrays
+    const shortMin = Math.min(...fast_mas_int);
+    const shortMax = Math.max(...fast_mas_int);
+    const shortStep = fast_mas_int.length > 1 
+      ? Math.min(...fast_mas_int.slice(1).map((v: number, i: number) => v - fast_mas_int[i]))
+      : 5;
+    
+    const longMin = Math.min(...slow_mas_int);
+    const longMax = Math.max(...slow_mas_int);
+    const longStep = slow_mas_int.length > 1
+      ? Math.min(...slow_mas_int.slice(1).map((v: number, i: number) => v - slow_mas_int[i]))
+      : 50;
+    
+    // Convert period to startDate/endDate
+    let startDate, endDate;
+    const today = new Date();
+    endDate = today.toISOString().split('T')[0]; // YYYY-MM-DD
+    
+    switch (values.period) {
+      case '3m':
+        const threeMonthsAgo = new Date(today);
+        threeMonthsAgo.setMonth(today.getMonth() - 3);
+        startDate = threeMonthsAgo.toISOString().split('T')[0];
+        break;
+      case '6m':
+        const sixMonthsAgo = new Date(today);
+        sixMonthsAgo.setMonth(today.getMonth() - 6);
+        startDate = sixMonthsAgo.toISOString().split('T')[0];
+        break;
+      case '1y':
+      default:
+        const oneYearAgo = new Date(today);
+        oneYearAgo.setFullYear(today.getFullYear() - 1);
+        startDate = oneYearAgo.toISOString().split('T')[0];
+        break;
+    }
+    
+    // New payload format
+    const payload = {
+      symbol: values.symbol.toUpperCase(),
+      strategy: values.strategy,
+      startDate: startDate,
+      endDate: endDate,
+      initialCapital: values.initial_capital || 100000,
+      parameters: {
+        short_ma: {
+          min: shortMin,
+          max: shortMax,
+          step: shortStep
+        },
+        long_ma: {
+          min: longMin,
+          max: longMax,
+          step: longStep
+        }
+      }
+    };
+    
+    console.log('=== ParameterOptimization.tsx: Sending optimization request ===');
+    console.log('Payload:', JSON.stringify(payload, null, 2));
+    
+    try {
+      const response = await backtraderAPI.runParameterOptimization(payload);
+      
+      if (response.data.success) {
+        setOptimizationResults(response.data.results);
+        
+        // Calculate statistics
+        const returns = response.data.results.map((r: any) => r.totalReturn);
+        const totalCombinations = response.data.totalCombinations;
+        const validCombinations = response.data.validCombinations;
+        
+        setStats({
+          totalCombinations,
+          validCombinations,
+          bestReturn: returns.length > 0 ? Math.max(...returns) : 0,
+          worstReturn: returns.length > 0 ? Math.min(...returns) : 0,
+          avgReturn: returns.length > 0 ? returns.reduce((a: number, b: number) => a + b, 0) / returns.length : 0
+        });
+      } else {
+        setError(response.data.error || 'Optimization failed');
+      }
+    } catch (err: any) {
+      setError(err.message || t.errors.optimizationFailed);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const columns = [
+    {
+      title: 'Rank',
+      dataIndex: 'rank',
+      key: 'rank',
+      width: 80,
+      render: (rank: number) => (
+        <div style={{ 
+          display: 'flex', 
+          alignItems: 'center', 
+          justifyContent: 'center',
+          fontWeight: 'bold',
+          fontSize: rank === 1 ? '16px' : '14px',
+          color: rank === 1 ? '#ffd700' : rank === 2 ? '#c0c0c0' : rank === 3 ? '#cd7f32' : '#666'
+        }}>
+          {rank === 1 && <TrophyOutlined style={{ marginRight: '4px' }} />}
+          {rank}
+        </div>
+      ),
+    },
+    {
+      title: 'Short MA',
+      dataIndex: 'short_ma',
+      key: 'short_ma',
+      width: 90,
+      render: (value: number) => (
+        <Tag color="blue" style={{ fontWeight: 'bold' }}>
+          {value}
+        </Tag>
+      ),
+    },
+    {
+      title: 'Long MA',
+      dataIndex: 'long_ma',
+      key: 'long_ma',
+      width: 90,
+      render: (value: number) => (
+        <Tag color="green" style={{ fontWeight: 'bold' }}>
+          {value}
+        </Tag>
+      ),
+    },
+    {
+      title: t.optimization.totalReturn || 'Total Return',
+      dataIndex: 'totalReturn',
+      key: 'totalReturn',
+      width: 120,
+      defaultSortOrder: 'descend' as const,
+      sorter: (a: OptimizationResult, b: OptimizationResult) => a.totalReturn - b.totalReturn,
+      render: (value: number) => {
+        const color = value >= 0 ? '#3f8600' : '#cf1322';
+        return (
+          <span style={{ color, fontWeight: 'bold', fontSize: '14px' }}>
+            {formatPercent(value)}
+          </span>
+        );
+      },
+    },
+    {
+      title: t.optimization.annualized || 'Annualized',
+      dataIndex: 'annualizedReturn',
+      key: 'annualizedReturn',
+      width: 120,
+      sorter: (a: OptimizationResult, b: OptimizationResult) => a.annualizedReturn - b.annualizedReturn,
+      render: (value: number) => {
+        const color = value >= 0 ? '#3f8600' : '#cf1322';
+        return (
+          <span style={{ color, fontWeight: 'bold' }}>
+            {formatPercent(value)}
+          </span>
+        );
+      },
+    },
+    {
+      title: t.optimization.sharpe || 'Sharpe',
+      dataIndex: 'sharpeRatio',
+      key: 'sharpeRatio',
+      width: 90,
+      sorter: (a: OptimizationResult, b: OptimizationResult) => a.sharpeRatio - b.sharpeRatio,
+      render: (value: number) => {
+        const color = value >= 1 ? '#3f8600' : value >= 0 ? '#fa8c16' : '#cf1322';
+        return (
+          <span style={{ color, fontWeight: 'bold' }}>
+            {value.toFixed(2)}
+          </span>
+        );
+      },
+    },
+    {
+      title: t.optimization.maxDD || 'Max DD',
+      dataIndex: 'maxDrawdown',
+      key: 'maxDrawdown',
+      width: 90,
+      sorter: (a: OptimizationResult, b: OptimizationResult) => a.maxDrawdown - b.maxDrawdown,
+      render: (value: number) => {
+        // Max Drawdown 越小越好
+        let color = '#cf1322'; // 默认红色
+        if (value > -20) {
+          color = '#3f8600'; // 绿色
+        } else if (value >= -40) {
+          color = '#fa8c16'; // 橙色
+        }
+        return (
+          <span style={{ color, fontWeight: 'bold' }}>
+            {value.toFixed(1)}%
+          </span>
+        );
+      },
+    },
+    {
+      title: t.optimization.trades || 'Trades',
+      dataIndex: 'trades',
+      key: 'trades',
+      width: 80,
+      sorter: (a: OptimizationResult, b: OptimizationResult) => a.trades - b.trades,
+      render: (value: number) => (
+        <span style={{ fontWeight: 'bold' }}>
+          {Math.round(value)}
+        </span>
+      ),
+    },
+  ];
+
+  return (
+    <div style={{ padding: '24px' }}>
+      {/* Header */}
+      <div style={{ marginBottom: '24px' }}>
+        <h1 style={{ marginBottom: '8px' }}>
+          <RocketOutlined style={{ marginRight: '12px', color: '#1890ff' }} />
+          {t.optimization.title}
+        </h1>
+        <div style={{ color: '#666', fontSize: '14px' }}>
+          {t.optimization.subtitle}
+        </div>
+      </div>
+
+      {/* Optimization Form */}
+      <Card style={{ marginBottom: '24px' }}>
+        <Form
+          form={form}
+          layout="vertical"
+          onFinish={handleRunOptimization}
+          initialValues={{
+            symbol: 'AAPL',
+            strategy: 'moving_average',
+            fast_mas: [5, 10, 20],
+            slow_mas: [50, 100, 200],
+            period: '1y',
+            initial_capital: 100000
+          }}
+        >
+          <Row gutter={[16, 16]}>
+            <Col span={6}>
+              <Form.Item
+                label={t.optimization.symbol || "Symbol"}
+                name="symbol"
+                rules={[{ required: true, message: 'Please select a symbol' }]}
+              >
+                <Input placeholder="e.g., AAPL" style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+            <Col span={6}>
+              <Form.Item
+                label={t.optimization.strategy || "Strategy"}
+                name="strategy"
+              >
+                <Select disabled>
+                  <Select.Option value="moving_average">Moving Average</Select.Option>
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col span={6}>
+              <Form.Item
+                label={t.optimization.period || "Period"}
+                name="period"
+              >
+                <Select>
+                  <Select.Option value="3m">3 Months</Select.Option>
+                  <Select.Option value="6m">6 Months</Select.Option>
+                  <Select.Option value="1y">1 Year</Select.Option>
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col span={6}>
+              <Form.Item
+                label={t.optimization.initialCapital || "Initial Capital"}
+                name="initial_capital"
+              >
+                <InputNumber
+                  style={{ width: '100%' }}
+                  min={1000}
+                  max={1000000}
+                  step={10000}
+                  formatter={value => `$ ${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
+                />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Row gutter={[16, 16]}>
+            <Col span={12}>
+              <Form.Item
+                label={t.optimization.fastMAValues || "Fast MA Values"}
+                name="fast_mas"
+                rules={[{ required: true, message: 'Please select at least one Fast MA value' }]}
+                tooltip="Fast moving average periods to test (e.g., 5, 10, 20)"
+              >
+                <Select mode="tags" placeholder="Enter Fast MA values">
+                  <Select.Option value="5">5</Select.Option>
+                  <Select.Option value="10">10</Select.Option>
+                  <Select.Option value="20">20</Select.Option>
+                  <Select.Option value="30">30</Select.Option>
+                  <Select.Option value="40">40</Select.Option>
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                label={t.optimization.slowMAValues || "Slow MA Values"}
+                name="slow_mas"
+                rules={[{ required: true, message: 'Please select at least one Slow MA value' }]}
+                tooltip="Slow moving average periods to test (e.g., 50, 100, 200)"
+              >
+                <Select mode="tags" placeholder="Enter Slow MA values">
+                  <Select.Option value="50">50</Select.Option>
+                  <Select.Option value="100">100</Select.Option>
+                  <Select.Option value="150">150</Select.Option>
+                  <Select.Option value="200">200</Select.Option>
+                  <Select.Option value="250">250</Select.Option>
+                </Select>
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Form.Item>
+            <Button
+              type="primary"
+              htmlType="submit"
+              loading={loading}
+              icon={<RocketOutlined />}
+              size="large"
+            >
+              {t.optimization.runOptimization}
+            </Button>
+            <span style={{ marginLeft: '12px', fontSize: '12px', color: '#666' }}>
+              Will test {Form.useWatch('fast_mas', form)?.length || 0} × {Form.useWatch('slow_mas', form)?.length || 0} = {(Form.useWatch('fast_mas', form)?.length || 0) * (Form.useWatch('slow_mas', form)?.length || 0)} combinations
+            </span>
+          </Form.Item>
+        </Form>
+      </Card>
+
+      {/* Error Display */}
+      {error && (
+        <Alert
+          message="Optimization Error"
+          description={error}
+          type="error"
+          showIcon
+          style={{ marginBottom: '24px' }}
+        />
+      )}
+
+      {/* Statistics and Heatmap */}
+      {optimizationResults.length > 0 && (
+        <>
+          <Card style={{ marginBottom: '24px' }}>
+            <Row gutter={[16, 16]}>
+              <Col span={4}>
+                <Statistic
+                  title="Total Combinations"
+                  value={stats.totalCombinations}
+                  valueStyle={{ color: '#1890ff', fontSize: '20px' }}
+                />
+              </Col>
+              <Col span={4}>
+                <Statistic
+                  title="Valid Results"
+                  value={stats.validCombinations}
+                  valueStyle={{ color: '#52c41a', fontSize: '20px' }}
+                />
+              </Col>
+              <Col span={4}>
+                <Statistic
+                  title={t.optimization.bestReturn || "Best Return"}
+                  value={formatPercent(stats.bestReturn)}
+                  valueStyle={{ color: '#3f8600', fontSize: '20px' }}
+                />
+              </Col>
+              <Col span={4}>
+                <Statistic
+                  title={t.optimization.worstReturn || "Worst Return"}
+                  value={formatPercent(stats.worstReturn)}
+                  valueStyle={{ color: '#cf1322', fontSize: '20px' }}
+                />
+              </Col>
+              <Col span={4}>
+                <Statistic
+                  title={t.optimization.averageReturn || "Average Return"}
+                  value={formatPercent(stats.avgReturn)}
+                  valueStyle={{ color: '#fa8c16', fontSize: '20px' }}
+                />
+              </Col>
+              <Col span={4}>
+                <Statistic
+                  title={t.optimization.topCombination || "Top Combination"}
+                  value={`${optimizationResults[0]?.short_ma}/${optimizationResults[0]?.long_ma}`}
+                  valueStyle={{ color: '#ffd700', fontSize: '20px', fontWeight: 'bold' }}
+                />
+              </Col>
+            </Row>
+          </Card>
+
+          {/* Optimization Heatmap */}
+          <Card style={{ marginBottom: '24px' }}>
+            <h3 style={{ marginBottom: '16px' }}>Optimization Heatmap</h3>
+            <div style={{ 
+              background: 'white',
+              borderRadius: '8px',
+              padding: '20px',
+              border: '1px solid #e8e8e8',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center'
+            }}>
+              <div style={{ marginBottom: '16px', fontSize: '12px', color: '#666', textAlign: 'center' }}>
+                X-axis: Short MA (fast), Y-axis: Long MA (slow). Color represents Sharpe Ratio.
+              </div>
+              
+              {(() => {
+                // Prepare data for heatmap
+                const results = optimizationResults;
+                
+                // Get unique short_ma and long_ma values
+                const shortSet = new Set<number>();
+                const longSet = new Set<number>();
+                results.forEach((r: OptimizationResult) => {
+                  shortSet.add(r.short_ma);
+                  longSet.add(r.long_ma);
+                });
+                const shortValues = Array.from(shortSet).sort((a, b) => a - b);
+                const longValues = Array.from(longSet).sort((a, b) => a - b);
+
+                // Create a map for quick lookup
+                const resultMap = new Map<string, OptimizationResult>();
+                results.forEach((result: OptimizationResult) => {
+                  resultMap.set(`${result.short_ma}_${result.long_ma}`, result);
+                });
+
+                // Calculate Sharpe Ratio range for color scaling
+                const sharpeValues = results.map((r: OptimizationResult) => r.sharpeRatio);
+                const minSharpe = Math.min(...sharpeValues);
+                const maxSharpe = Math.max(...sharpeValues);
+                const sharpeRange = maxSharpe - minSharpe;
+
+                // Function to get color based on Sharpe Ratio
+                const getColor = (sharpe: number) => {
+                  if (sharpeRange === 0) return '#d9d9d9'; // Gray if all values are the same
+                  
+                  const normalized = (sharpe - minSharpe) / sharpeRange;
+                  
+                  // Color gradient: red (low) -> yellow (medium) -> green (high)
+                  if (normalized < 0.5) {
+                    // Red to Yellow
+                    const r = 255;
+                    const g = Math.round(255 * (normalized * 2));
+                    return `rgb(${r}, ${g}, 0)`;
+                  } else {
+                    // Yellow to Green
+                    const r = Math.round(255 * (1 - (normalized - 0.5) * 2));
+                    const g = 255;
+                    return `rgb(${r}, ${g}, 0)`;
+                  }
+                };
+
+                return (
+                  <div style={{ 
+                    display: 'grid',
+                    gridTemplateColumns: `auto repeat(${shortValues.length}, 1fr)`,
+                    gap: '2px',
+                    fontSize: '10px'
+                  }}>
+                    {/* Top-left empty cell */}
+                    <div style={{ 
+                      padding: '8px',
+                      textAlign: 'center',
+                      fontWeight: 'bold',
+                      background: '#fafafa'
+                    }}>
+                      Short MA →
+                    </div>
+                    
+                    {/* X-axis headers (short_ma values) */}
+                    {shortValues.map(shortVal => (
+                      <div key={`header-${shortVal}`} style={{ 
+                        padding: '8px',
+                        textAlign: 'center',
+                        fontWeight: 'bold',
+                        background: '#fafafa',
+                        borderBottom: '2px solid #1890ff'
+                      }}>
+                        {shortVal}
+                      </div>
+                    ))}
+                    
+                    {/* Heatmap rows */}
+                    {longValues.map(longVal => (
+                      <React.Fragment key={`row-${longVal}`}>
+                        {/* Y-axis header (long_ma value) */}
+                        <div style={{ 
+                          padding: '8px',
+                          textAlign: 'center',
+                          fontWeight: 'bold',
+                          background: '#fafafa',
+                          borderRight: '2px solid #1890ff'
+                        }}>
+                          {longVal}
+                        </div>
+                        
+                        {/* Heatmap cells */}
+                        {shortValues.map(shortVal => {
+                          const result = resultMap.get(`${shortVal}_${longVal}`);
+                          const hasResult = !!result;
+                          const sharpe = hasResult ? result.sharpeRatio : 0;
+                          
+                          return (
+                            <Tooltip
+                              key={`cell-${shortVal}-${longVal}`}
+                              title={hasResult ? (
+                                <div style={{ fontSize: '12px', color: '#000' }}>
+                                  <div><strong>Parameters:</strong> Short MA={shortVal}, Long MA={longVal}</div>
+                                  <div><strong>Sharpe Ratio:</strong> <span style={{ color: sharpe >= 0 ? '#52c41a' : '#ff4d4f' }}>{sharpe.toFixed(2)}</span></div>
+                                  <div><strong>Total Return:</strong> <span style={{ color: result.totalReturn >= 0 ? '#52c41a' : '#ff4d4f' }}>{result.totalReturn >= 0 ? '+' : ''}{result.totalReturn.toFixed(2)}%</span></div>
+                                  <div><strong>Max Drawdown:</strong> <span style={{ color: '#ff4d4f' }}>{result.maxDrawdown.toFixed(2)}%</span></div>
+                                  <div><strong>Trades:</strong> {result.trades}</div>
+                                </div>
+                              ) : (
+                                <div style={{ color: '#000' }}>No data for Short MA={shortVal}, Long MA={longVal}</div>
+                              )}
+                              placement="top"
+                              color="white"
+                              overlayStyle={{ maxWidth: '300px' }}
+                            >
+                              <div
+                                style={{
+                                  width: '40px',
+                                  height: '40px',
+                                  background: hasResult ? getColor(sharpe) : '#f5f5f5',
+                                  border: '1px solid #e8e8e8',
+                                  borderRadius: '2px',
+                                  cursor: hasResult ? 'pointer' : 'default',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  transition: 'transform 0.2s'
+                                }}
+                                onMouseEnter={(e) => {
+                                  if (hasResult) {
+                                    e.currentTarget.style.transform = 'scale(1.1)';
+                                    e.currentTarget.style.zIndex = '1';
+                                    e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.15)';
+                                  }
+                                }}
+                                onMouseLeave={(e) => {
+                                  if (hasResult) {
+                                    e.currentTarget.style.transform = 'scale(1)';
+                                    e.currentTarget.style.zIndex = '0';
+                                    e.currentTarget.style.boxShadow = 'none';
+                                  }
+                                }}
+                              >
+                                {hasResult && (
+                                  <span style={{
+                                    color: sharpe >= 0 ? '#000' : '#fff',
+                                    fontWeight: 'bold',
+                                    fontSize: '9px'
+                                  }}>
+                                    {sharpe.toFixed(1)}
+                                  </span>
+                                )}
+                              </div>
+                            </Tooltip>
+                          );
+                        })}
+                      </React.Fragment>
+                    ))}
+                    
+                    {/* Color legend */}
+                    <div style={{ 
+                      gridColumn: `1 / span ${shortValues.length + 1}`,
+                      marginTop: '16px',
+                      paddingTop: '16px',
+                      borderTop: '1px solid #e8e8e8'
+                    }}>
+                      <div style={{ fontSize: '11px', color: '#666', marginBottom: '8px' }}>
+                        Sharpe Ratio Color Legend:
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '10px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center' }}>
+                          <div style={{ width: '12px', height: '12px', background: 'rgb(255, 0, 0)', marginRight: '4px' }}></div>
+                          <span>Low ({minSharpe.toFixed(2)})</span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center' }}>
+                          <div style={{ width: '12px', height: '12px', background: 'rgb(255, 255, 0)', marginRight: '4px' }}></div>
+                          <span>Medium</span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center' }}>
+                          <div style={{ width: '12px', height: '12px', background: 'rgb(0, 255, 0)', marginRight: '4px' }}></div>
+                          <span>High ({maxSharpe.toFixed(2)})</span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center' }}>
+                          <div style={{ width: '12px', height: '12px', background: '#f5f5f5', border: '1px solid #e8e8e8', marginRight: '4px' }}></div>
+                          <span>No Data</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+          </Card>
+        </>
+      )}
+
+      {/* Results Table */}
+      {loading ? (
+        <div style={{ padding: '40px', textAlign: 'center' }}>
+          <Spin size="large" />
+          <div style={{ marginTop: '16px', color: '#666' }}>
+            {t.optimization.optimizationRunning}... Testing {stats.totalCombinations} parameter combinations
+          </div>
+        </div>
+      ) : optimizationResults.length > 0 ? (
+        <Card title="Optimization Results">
+          <Table
+            columns={columns}
+            dataSource={optimizationResults}
+            pagination={{
+              pageSize: 10,
+              showSizeChanger: true,
+              showQuickJumper: true,
+              showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} combinations`,
+            }}
+            size="middle"
+            scroll={{ x: 800 }}
+            bordered
+            rowClassName={(record, index) => 
+              index === 0 ? 'top-rank-row' : index === 1 ? 'second-rank-row' : index === 2 ? 'third-rank-row' : ''
+            }
+          />
+        </Card>
+      ) : (
+        <Card style={{ textAlign: 'center', padding: '40px 0' }}>
+          <BarChartOutlined style={{ fontSize: '48px', color: '#d9d9d9', marginBottom: '16px' }} />
+          <div style={{ fontSize: '16px', color: '#666', marginBottom: '8px' }}>
+            {t.optimization.noResults}
+          </div>
+          <div style={{ fontSize: '14px', color: '#999' }}>
+            {t.optimization.subtitle}
+          </div>
+        </Card>
+      )} {
+                          const result = resultMap.get(`${shortVal}_${longVal}`);
+                          const hasResult = !!result;
+                          const sharpe = hasResult ? result.sharpeRatio : 0;
+
+
+      {/* Results Table */}
+      {loading ? (
+        <div style={{ padding: '40px', textAlign: 'center' }}>
+          <Spin size="large" />
+          <div style={{ marginTop: '16px', color: '#666' }}>
+            {t.optimization.optimizationRunning}... Testing {stats.totalCombinations} parameter combinations
+          </div>
+        </div>
+      ) : optimizationResults.length > 0 ? (
+        <Card title="Optimization Results">
+          <Table
+            columns={columns}
+            dataSource={optimizationResults}
+            pagination={{
+              pageSize: 10,
+              showSizeChanger: true,
+              showQuickJumper: true,
+              showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} combinations`,
+            }}
+            size="middle"
+            scroll={{ x: 800 }}
+            bordered
+            rowClassName={(record, index) => 
+              index === 0 ? 'top-rank-row' : index === 1 ? 'second-rank-row' : index === 2 ? 'third-rank-row' : ''
+            }
+          />
+        </Card>
+      ) : (
+        <Card style={{ textAlign: 'center', padding: '40px 0' }}>
+          <BarChartOutlined style={{ fontSize: '48px', color: '#d9d9d9', marginBottom: '16px' }} />
+          <div style={{ fontSize: '16px', color: '#666', marginBottom: '8px' }}>
+            {t.optimization.noResults}
+          </div>
+          <div style={{ fontSize: '14px', color: '#999' }}>
+            {t.optimization.subtitle}
+          </div>
+        </Card>
+      )}
+
+      {/* Optimization Tips */}
+      <Card style={{ marginTop: '24px' }}>
+        <div style={{ fontSize: '14px', fontWeight: '500', marginBottom: '12px' }}>
+          💡 Optimization Tips
+        </div>
+        <ul style={{ margin: 0, paddingLeft: '20px', color: '#666', fontSize: '13px' }}>
+          <li><strong>Fast MA</strong> should be smaller than <strong>Slow MA</strong> (e.g., 5/50, 10/100)</li>
+          <li>More parameter combinations = longer optimization time</li>
+          <li>Start with fewer values (e.g., 3×3=9 combinations) for quick testing</li>
+          <li>The best combination is ranked #1 (gold medal)</li>
+          <li>Results are sorted by Total Return (highest first)</li>
+        </ul>
+      </Card>
+    </div>
+  );
+};
+
+export default ParameterOptimization;

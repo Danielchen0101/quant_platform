@@ -403,6 +403,12 @@ const BacktestDetail: React.FC = () => {
               <TradingChart
                 data={backtestResult.results.chartData}
                 height={500}
+                parameters={{
+                  strategy: backtestResult.parameters?.strategy,
+                  symbol: backtestResult.parameters?.symbols?.[0],
+                  period: backtestResult.parameters?.period,
+                  initialCapital: backtestResult.parameters?.initialCapital
+                }}
               />
             ) : (
               <Empty 

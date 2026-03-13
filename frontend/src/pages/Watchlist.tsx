@@ -2,31 +2,52 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, Table, Button, Input, Space, Alert, Empty, Tag, message } from 'antd';
 import { PlusOutlined, PlayCircleOutlined, DeleteOutlined } from '@ant-design/icons';
+import { useLanguage } from '../contexts/LanguageContext';
+
+const STORAGE_KEY = "quant_watchlist";
 
 const Watchlist: React.FC = () => {
+  const { t } = useLanguage();
   const navigate = useNavigate();
   const [symbols, setSymbols] = useState<string[]>([]);
   const [newSymbol, setNewSymbol] = useState('');
   const [loading, setLoading] = useState(false);
+  const hasLoaded = React.useRef(false);
 
   // Load watchlist from localStorage on component mount
   useEffect(() => {
-    const savedWatchlist = localStorage.getItem('quant_watchlist');
-    if (savedWatchlist) {
+    // Prevent double loading in React Strict Mode
+    if (hasLoaded.current) {
+      return;
+    }
+    
+    const saved = localStorage.getItem(STORAGE_KEY);
+    
+    if (saved) {
       try {
-        const parsed = JSON.parse(savedWatchlist);
+        const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) {
           setSymbols(parsed);
+        } else {
+          setSymbols([]);
         }
       } catch (err) {
         console.error('Failed to parse watchlist from localStorage:', err);
+        setSymbols([]);
       }
     }
+    
+    hasLoaded.current = true;
   }, []);
 
   // Save watchlist to localStorage whenever it changes
   useEffect(() => {
-    localStorage.setItem('quant_watchlist', JSON.stringify(symbols));
+    // Don't save on initial mount (empty array)
+    if (symbols.length === 0 && !hasLoaded.current) {
+      return;
+    }
+    
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(symbols));
   }, [symbols]);
 
   const handleAddSymbol = () => {
@@ -43,20 +64,27 @@ const Watchlist: React.FC = () => {
       return;
     }
 
-    // Check for duplicates
-    if (symbols.includes(symbol)) {
-      message.warning(`${symbol} is already in your watchlist`);
-      return;
-    }
-
-    setSymbols([...symbols, symbol]);
+    // Check for duplicates using functional update to ensure consistency
+    setSymbols(prevSymbols => {
+      if (prevSymbols.includes(symbol)) {
+        message.warning(`${symbol} is already in your watchlist`);
+        return prevSymbols;
+      }
+      
+      const updatedSymbols = [...prevSymbols, symbol];
+      message.success(`${symbol} added to watchlist`);
+      return updatedSymbols;
+    });
+    
     setNewSymbol('');
-    message.success(`${symbol} added to watchlist`);
   };
 
   const handleRemoveSymbol = (symbolToRemove: string) => {
-    setSymbols(symbols.filter(symbol => symbol !== symbolToRemove));
-    message.success(`${symbolToRemove} removed from watchlist`);
+    setSymbols(prevSymbols => {
+      const updatedSymbols = prevSymbols.filter(symbol => symbol !== symbolToRemove);
+      message.success(`${symbolToRemove} removed from watchlist`);
+      return updatedSymbols;
+    });
   };
 
   const handleRunBacktest = (symbol: string) => {
@@ -119,9 +147,9 @@ const Watchlist: React.FC = () => {
     <div style={{ padding: '24px' }}>
       {/* Header */}
       <div style={{ marginBottom: '24px' }}>
-        <h1 style={{ marginBottom: '8px' }}>My Watchlist</h1>
+        <h1 style={{ marginBottom: '8px' }}>{t.watchlist.title}</h1>
         <div style={{ color: '#666', fontSize: '14px' }}>
-          Manage your favorite stocks and run quick backtests
+          {t.watchlist.subtitle}
         </div>
       </div>
 

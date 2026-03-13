@@ -3,6 +3,7 @@ import { Card, Table, Tag, Input, Select, Button, Row, Col, Statistic, Space, Al
 import { SearchOutlined, LineChartOutlined, PlayCircleOutlined, BarChartOutlined, ReloadOutlined, EyeOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { marketAPI } from '../services/api';
+import { useLanguage } from '../contexts/LanguageContext';
 
 const { Option } = Select;
 

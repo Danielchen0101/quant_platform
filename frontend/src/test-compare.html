@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Compare Page</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .test-case { margin: 20px 0; padding: 10px; border: 1px solid #ccc; }
+        button { margin: 5px; padding: 10px; }
+        .result { margin-top: 10px; padding: 10px; background: #f5f5f5; }
+    </style>
+</head>
+<body>
+    <h1>Test Strategy Comparison Page</h1>
+    
+    <div class="test-case">
+        <h3>测试用例 1: 有效参数</h3>
+        <p>访问带有效 backtestId 的 Compare 页面</p>
+        <button onclick="testValidParams()">测试有效参数</button>
+        <div id="result1" class="result"></div>
+    </div>
+    
+    <div class="test-case">
+        <h3>测试用例 2: 无参数</h3>
+        <p>访问不带参数的 Compare 页面</p>
+        <button onclick="testNoParams()">测试无参数</button>
+        <div id="result2" class="result"></div>
+    </div>
+    
+    <div class="test-case">
+        <h3>测试用例 3: 无效参数</h3>
+        <p>访问带无效 backtestId 的 Compare 页面</p>
+        <button onclick="testInvalidParams()">测试无效参数</button>
+        <div id="result3" class="result"></div>
+    </div>
+    
+    <div class="test-case">
+        <h3>当前后端数据</h3>
+        <button onclick="checkBackendData()">检查后端数据</button>
+        <div id="backendData" class="result"></div>
+    </div>
+
+    <script>
+        async function testValidParams() {
+            const resultDiv = document.getElementById('result1');
+            resultDiv.innerHTML = '测试中...';
+            
+            try {
+                // 使用已知的 backtestId
+                const response = await fetch('http://localhost:8889/api/backtest/history');
+                const data = await response.json();
+                
+                if (data && data.length > 0) {
+                    const backtestId = data[0].backtestId;
+                    resultDiv.innerHTML = `✅ 找到 backtestId: ${backtestId}<br>
+                                           📋 测试 URL: <a href="http://localhost:3000/compare?ids=${backtestId}" target="_blank">/compare?ids=${backtestId}</a>`;
+                } else {
+                    resultDiv.innerHTML = '❌ 后端没有回测数据';
+                }
+            } catch (error) {
+                resultDiv.innerHTML = `❌ 错误: ${error.message}`;
+            }
+        }
+        
+        async function testNoParams() {
+            const resultDiv = document.getElementById('result2');
+            resultDiv.innerHTML = '📋 测试 URL: <a href="http://localhost:3000/compare" target="_blank">/compare</a><br>应该显示: "No backtests selected for comparison"';
+        }
+        
+        async function testInvalidParams() {
+            const resultDiv = document.getElementById('result3');
+            resultDiv.innerHTML = '📋 测试 URL: <a href="http://localhost:3000/compare?ids=invalid_id" target="_blank">/compare?ids=invalid_id</a><br>应该显示: "No matching backtests found in history"';
+        }
+        
+        async function checkBackendData() {
+            const resultDiv = document.getElementById('backendData');
+            resultDiv.innerHTML = '获取中...';
+            
+            try {
+                const response = await fetch('http://localhost:8889/api/backtest/history');
+                const data = await response.json();
+                
+                if (data && Array.isArray(data)) {
+                    resultDiv.innerHTML = `✅ 后端有 ${data.length} 条回测记录:<br>`;
+                    data.forEach((item, index) => {
+                        resultDiv.innerHTML += `${index + 1}. ${item.backtestId} (${item.parameters?.symbols?.[0] || 'N/A'})<br>`;
+                    });
+                } else {
+                    resultDiv.innerHTML = '❌ 后端返回的数据格式不正确';
+                }
+            } catch (error) {
+                resultDiv.innerHTML = `❌ 错误: ${error.message}`;
+            }
+        }
+        
+        // 页面加载时自动检查后端数据
+        window.onload = checkBackendData;
+    </script>
+</body>
+</html>
