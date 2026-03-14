@@ -7,10 +7,12 @@ import {
   RiseOutlined,
   FallOutlined
 } from '@ant-design/icons';
+import { useLanguage } from '../contexts/LanguageContext';
 
 const { Title, Text } = Typography;
 
 const Analytics: React.FC = () => {
+  const { t } = useLanguage();
   const performanceData = [
     { month: 'Jan', value: 65 },
     { month: 'Feb', value: 72 },
@@ -37,16 +39,12 @@ const Analytics: React.FC = () => {
 
   return (
     <div>
-      <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
-        <Col xs={24}>
-          <Card>
-            <Title level={3} style={{ margin: 0 }}>
-              <LineChartOutlined /> Portfolio Analytics
-            </Title>
-            <Text type="secondary">Comprehensive analysis of your portfolio performance</Text>
-          </Card>
-        </Col>
-      </Row>
+      <h1 style={{ marginBottom: 24, fontSize: '28px', fontWeight: '600' }}>
+        <LineChartOutlined /> {t.analytics.title}
+      </h1>
+      <div style={{ color: '#666', fontSize: '16px', marginBottom: '24px' }}>
+        {t.analytics.subtitle}
+      </div>
 
       <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
         <Col xs={24} lg={8}>

@@ -36,6 +36,7 @@ export default {
     backtest: '回测',
     strategyComparison: '策略比较',
     strategyRanking: '策略排名',
+    analytics: '分析',
     watchlist: '观察列表',
     profile: '个人资料',
     parameterOptimization: '参数优化',
@@ -241,6 +242,12 @@ export default {
     symbol: '股票代码',
     strategy: '策略类型',
     topCombination: '最佳组合',
+  },
+
+  // Analytics 页面
+  analytics: {
+    title: 'AlphaLab — 分析',
+    subtitle: '策略分析和性能洞察',
   },
 
   // 策略类型

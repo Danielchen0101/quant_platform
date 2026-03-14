@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Card, Row, Col, Statistic, Table, Tag, Progress, Alert, Button, Space, Spin, Empty, message } from 'antd';
 import { ArrowUpOutlined, ArrowDownOutlined, LineChartOutlined, PlayCircleOutlined, EyeOutlined, ReloadOutlined, ExclamationCircleOutlined } from '@ant-design/icons';
+import { Server, Cpu, MemoryStick, TrendingUp, TrendingDown, Target, Award, BarChart3, LineChart, DollarSign, TrendingUp as TrendingUpIcon, TrendingDown as TrendingDownIcon, Building2, Hash, Search, PlayCircle, BarChart, RefreshCw, Layers, History, Trophy, Percent } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { systemAPI, marketAPI, backtraderAPI } from '../services/api';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -287,52 +288,167 @@ const Dashboard: React.FC = () => {
   };
 
   const handleViewAnalysis = () => {
-    navigate('/analysis');
+    navigate('/analytics');
   };
 
   const stockColumns = [
     {
-      title: 'Symbol',
+      title: (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <Hash size={14} color="#666" />
+          <span style={{ fontSize: '14px', fontWeight: '600', color: '#333' }}>SYMBOL</span>
+        </div>
+      ),
       dataIndex: 'symbol',
       key: 'symbol',
-      width: 80,
-      render: (symbol: string) => <strong>{symbol}</strong>,
+      width: 90,
+      render: (symbol: string) => (
+        <div style={{ 
+          fontWeight: '600', 
+          fontSize: '14px',
+          color: '#333',
+          letterSpacing: '0.3px'
+        }}>
+          {symbol}
+        </div>
+      ),
+      align: 'left' as const,
     },
     {
-      title: 'Name',
+      title: (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <Building2 size={14} color="#666" />
+          <span style={{ fontSize: '14px', fontWeight: '600', color: '#333' }}>NAME</span>
+        </div>
+      ),
       dataIndex: 'name',
       key: 'name',
-      width: 120,
+      width: 140,
+      render: (name: string) => (
+        <div style={{ 
+          fontSize: '14px',
+          color: '#555',
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis'
+        }}>
+          {name}
+        </div>
+      ),
+      align: 'left' as const,
     },
     {
-      title: 'Price',
+      title: (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <DollarSign size={14} color="#666" />
+          <span style={{ fontSize: '14px', fontWeight: '600', color: '#333' }}>PRICE</span>
+        </div>
+      ),
       dataIndex: 'price',
       key: 'price',
-      width: 80,
-      render: (price: number) => `$${safeToFixed(price, 2)}`,
+      width: 100,
+      render: (price: number) => (
+        <div style={{ 
+          textAlign: 'right',
+          fontFamily: "'Roboto Mono', monospace",
+          fontSize: '14px',
+          fontWeight: '500',
+          color: '#333'
+        }}>
+          ${safeToFixed(price, 2)}
+        </div>
+      ),
+      align: 'right' as const,
     },
     {
-      title: 'Change %',
+      title: (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <TrendingUpIcon size={14} color="#666" />
+          <span style={{ fontSize: '14px', fontWeight: '600', color: '#333' }}>CHANGE %</span>
+        </div>
+      ),
       dataIndex: 'changePercent',
       key: 'changePercent',
-      width: 100,
+      width: 110,
       render: (percent: number) => {
         const safePercent = safeNumber(percent);
+        const isPositive = safePercent >= 0;
         return (
-          <span style={{ color: safePercent >= 0 ? '#3f8600' : '#cf1322' }}>
-            {safePercent >= 0 ? '+' : ''}{safeToFixed(safePercent, 2)}%
-          </span>
+          <div style={{ 
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'flex-end',
+            gap: '4px'
+          }}>
+            {isPositive ? (
+              <TrendingUpIcon size={12} color="#34a853" />
+            ) : (
+              <TrendingDownIcon size={12} color="#ea4335" />
+            )}
+            <div style={{ 
+              fontFamily: "'Roboto Mono', monospace",
+              fontSize: '14px',
+              fontWeight: '600',
+              color: isPositive ? '#34a853' : '#ea4335',
+              textAlign: 'right'
+            }}>
+              {isPositive ? '+' : ''}{safeToFixed(safePercent, 2)}%
+            </div>
+          </div>
         );
       },
+      align: 'right' as const,
     },
     {
-      title: 'Market Cap',
+      title: (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <TrendingUp size={14} color="#666" />
+          <span style={{ fontSize: '14px', fontWeight: '600', color: '#333' }}>MKT CAP</span>
+        </div>
+      ),
       dataIndex: 'marketCap',
       key: 'marketCap',
-      width: 100,
-      render: (cap: number) => formatCurrency(cap),
+      width: 110,
+      render: (cap: number) => (
+        <div style={{ 
+          textAlign: 'right',
+          fontFamily: "'Roboto Mono', monospace",
+          fontSize: '14px',
+          fontWeight: '500',
+          color: '#666'
+        }}>
+          {formatCurrency(cap)}
+        </div>
+      ),
+      align: 'right' as const,
     },
   ];
+
+  // 计算最佳夏普比率
+  const getBestSharpeRatio = () => {
+    if (backtestData.length === 0) return 0;
+    let bestSharpe = -Infinity;
+    backtestData.forEach(item => {
+      if (item.results?.sharpeRatio && item.results.sharpeRatio > bestSharpe) {
+        bestSharpe = item.results.sharpeRatio;
+      }
+    });
+    return bestSharpe === -Infinity ? 0 : bestSharpe;
+  };
+
+  // 计算平均收益率
+  const getAverageReturn = () => {
+    if (backtestData.length === 0) return 0;
+    let totalReturn = 0;
+    let count = 0;
+    backtestData.forEach(item => {
+      if (item.results?.totalReturn !== undefined) {
+        totalReturn += item.results.totalReturn;
+        count++;
+      }
+    });
+    return count > 0 ? totalReturn / count : 0;
+  };
 
   const getLatestBacktest = () => {
     if (backtestData.length === 0) return null;
@@ -343,171 +459,198 @@ const Dashboard: React.FC = () => {
 
   return (
     <div>
-      <h1 style={{ marginBottom: 24 }}>
+      <h1 style={{ marginBottom: 24, fontSize: '28px', fontWeight: '600' }}>
         <LineChartOutlined /> {t.dashboard.title}
       </h1>
-      <div style={{ color: '#666', fontSize: '14px', marginBottom: '24px' }}>
+      <div style={{ color: '#666', fontSize: '16px', marginBottom: '24px' }}>
         {t.dashboard.subtitle}
       </div>
 
-      {/* 系统状态模块 */}
-      <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
-        <Col span={6}>
-          <Card size="small">
-            {systemLoading ? (
-              <div style={{ textAlign: 'center', padding: '20px' }}>
-                <Spin size="small" />
+      {/* 系统状态模块 - 优化版 */}
+      <Row gutter={[16, 16]} style={{ marginBottom: 24, alignItems: 'stretch' }}>
+        {/* 卡片1: Total Strategies */}
+        <Col span={6} style={{ display: 'flex' }}>
+          <Card 
+            size="small"
+            style={{ width: '100%', minHeight: '140px' }}
+            styles={{
+              body: { 
+                padding: '16px',
+                display: 'flex',
+                flexDirection: 'column',
+                height: '100%'
+              }
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', marginBottom: '12px', flexShrink: 0 }}>
+              <div style={{ 
+                background: 'rgba(66, 133, 244, 0.1)', 
+                borderRadius: '8px',
+                padding: '8px',
+                marginRight: '12px'
+              }}>
+                <Layers size={20} color="#4285f4" />
               </div>
-            ) : systemError ? (
-              <div style={{ textAlign: 'center', padding: '10px' }}>
-                <ExclamationCircleOutlined style={{ color: '#ff4d4f', fontSize: '18px', marginBottom: '8px' }} />
-                <div style={{ color: '#ff4d4f', fontSize: '12px', marginBottom: '8px' }}>System Status Error</div>
-                <Button 
-                  type="link" 
-                  size="small" 
-                  onClick={() => fetchSystemData(true)}
-                  icon={<ReloadOutlined />}
-                >
-                  Retry
-                </Button>
-              </div>
-            ) : (
-              <>
-                <Statistic
-                  title="System Status"
-                  value={systemData?.cpuUsage ? 'Online' : 'Offline'}
-                  valueStyle={{ 
-                    color: systemData?.cpuUsage ? '#3f8600' : '#cf1322',
-                    fontSize: '24px'
-                  }}
-                />
-                <div style={{ marginTop: '8px', fontSize: '12px', color: '#666' }}>
-                  Uptime: {systemData?.uptime || 'N/A'}
+              <div>
+                <div style={{ fontSize: '14px', color: '#666', fontWeight: '500' }}>Total Strategies</div>
+                <div style={{ 
+                  fontSize: '22px', 
+                  fontWeight: '600',
+                  color: '#4285f4'
+                }}>
+                  3
                 </div>
-              </>
-            )}
+              </div>
+            </div>
+            <div style={{ flex: 1, minHeight: '20px' }}></div>
+            <div style={{ fontSize: '11px', color: '#888', marginTop: 'auto', flexShrink: 0 }}>
+              Active: moving_average, RSI, MACD
+            </div>
           </Card>
         </Col>
-        <Col span={6}>
-          <Card size="small">
-            {systemLoading ? (
-              <div style={{ textAlign: 'center', padding: '20px' }}>
-                <Spin size="small" />
+
+        {/* 卡片2: Backtests Run */}
+        <Col span={6} style={{ display: 'flex' }}>
+          <Card 
+            size="small"
+            style={{ width: '100%', minHeight: '140px' }}
+            styles={{
+              body: { 
+                padding: '16px',
+                display: 'flex',
+                flexDirection: 'column',
+                height: '100%'
+              }
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', marginBottom: '12px', flexShrink: 0 }}>
+              <div style={{ 
+                background: 'rgba(52, 168, 83, 0.1)', 
+                borderRadius: '8px',
+                padding: '8px',
+                marginRight: '12px'
+              }}>
+                <History size={20} color="#34a853" />
               </div>
-            ) : systemError ? (
-              <div style={{ textAlign: 'center', padding: '10px' }}>
-                <ExclamationCircleOutlined style={{ color: '#ff4d4f', fontSize: '18px', marginBottom: '8px' }} />
-                <div style={{ color: '#ff4d4f', fontSize: '12px', marginBottom: '8px' }}>CPU Data Error</div>
-                <Button 
-                  type="link" 
-                  size="small" 
-                  onClick={() => fetchSystemData(true)}
-                  icon={<ReloadOutlined />}
-                >
-                  Retry
-                </Button>
-              </div>
-            ) : (
-              <>
-                <Statistic
-                  title="CPU Usage"
-                  value={safeToFixed(safeNumber(systemData?.cpuUsage), 1)}
-                  suffix="%"
-                  valueStyle={{ 
-                    color: safeNumber(systemData?.cpuUsage) > 80 ? '#cf1322' : '#3f8600',
-                    fontSize: '24px'
-                  }}
-                />
-                <Progress 
-                  percent={safeNumber(systemData?.cpuUsage)} 
-                  size="small" 
-                  showInfo={false}
-                  strokeColor={safeNumber(systemData?.cpuUsage) > 80 ? '#cf1322' : '#3f8600'}
-                />
-              </>
-            )}
-          </Card>
-        </Col>
-        <Col span={6}>
-          <Card size="small">
-            {systemLoading ? (
-              <div style={{ textAlign: 'center', padding: '20px' }}>
-                <Spin size="small" />
-              </div>
-            ) : systemError ? (
-              <div style={{ textAlign: 'center', padding: '10px' }}>
-                <ExclamationCircleOutlined style={{ color: '#ff4d4f', fontSize: '18px', marginBottom: '8px' }} />
-                <div style={{ color: '#ff4d4f', fontSize: '12px', marginBottom: '8px' }}>Memory Data Error</div>
-                <Button 
-                  type="link" 
-                  size="small" 
-                  onClick={() => fetchSystemData(true)}
-                  icon={<ReloadOutlined />}
-                >
-                  Retry
-                </Button>
-              </div>
-            ) : (
-              <>
-                <Statistic
-                  title="Memory Usage"
-                  value={safeToFixed(safeNumber(systemData?.memoryUsage), 1)}
-                  suffix="%"
-                  valueStyle={{ 
-                    color: safeNumber(systemData?.memoryUsage) > 80 ? '#cf1322' : '#3f8600',
-                    fontSize: '24px'
-                  }}
-                />
-                <Progress 
-                  percent={safeNumber(systemData?.memoryUsage)} 
-                  size="small" 
-                  showInfo={false}
-                  strokeColor={safeNumber(systemData?.memoryUsage) > 80 ? '#cf1322' : '#3f8600'}
-                />
-              </>
-            )}
-          </Card>
-        </Col>
-        <Col span={6}>
-          <Card size="small">
-            {marketLoading ? (
-              <div style={{ textAlign: 'center', padding: '20px' }}>
-                <Spin size="small" />
-              </div>
-            ) : marketError ? (
-              <div style={{ textAlign: 'center', padding: '10px' }}>
-                <ExclamationCircleOutlined style={{ color: '#ff4d4f', fontSize: '18px', marginBottom: '8px' }} />
-                <div style={{ color: '#ff4d4f', fontSize: '12px', marginBottom: '8px' }}>Market Data Error</div>
-                <Button 
-                  type="link" 
-                  size="small" 
-                  onClick={() => fetchMarketData(true)}
-                  icon={<ReloadOutlined />}
-                >
-                  Retry
-                </Button>
-              </div>
-            ) : (
-              <>
-                <Statistic
-                  title="Active Stocks"
-                  value={marketData.length}
-                  valueStyle={{ fontSize: '24px' }}
-                />
-                <div style={{ marginTop: '8px', fontSize: '12px', color: '#666' }}>
-                  Last update: {systemData?.lastUpdate || 'N/A'}
+              <div>
+                <div style={{ fontSize: '14px', color: '#666', fontWeight: '500' }}>Backtests Run</div>
+                <div style={{ 
+                  fontSize: '22px', 
+                  fontWeight: '600',
+                  color: '#34a853'
+                }}>
+                  {backtestData.length}
                 </div>
-              </>
-            )}
+              </div>
+            </div>
+            <div style={{ flex: 1, minHeight: '20px' }}></div>
+            <div style={{ fontSize: '11px', color: '#888', marginTop: 'auto', flexShrink: 0 }}>
+              Last 30 days: {backtestData.length}
+            </div>
+          </Card>
+        </Col>
+
+        {/* 卡片3: Best Sharpe Ratio */}
+        <Col span={6} style={{ display: 'flex' }}>
+          <Card 
+            size="small"
+            style={{ width: '100%', minHeight: '140px' }}
+            styles={{
+              body: { 
+                padding: '16px',
+                display: 'flex',
+                flexDirection: 'column',
+                height: '100%'
+              }
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', marginBottom: '12px', flexShrink: 0 }}>
+              <div style={{ 
+                background: 'rgba(251, 188, 5, 0.1)', 
+                borderRadius: '8px',
+                padding: '8px',
+                marginRight: '12px'
+              }}>
+                <Trophy size={20} color="#fbbc05" />
+              </div>
+              <div>
+                <div style={{ fontSize: '14px', color: '#666', fontWeight: '500' }}>Best Sharpe Ratio</div>
+                <div style={{ 
+                  fontSize: '22px', 
+                  fontWeight: '600',
+                  color: '#fbbc05'
+                }}>
+                  {safeToFixed(getBestSharpeRatio(), 2)}
+                </div>
+              </div>
+            </div>
+            <div style={{ flex: 1, minHeight: '20px' }}></div>
+            <div style={{ fontSize: '11px', color: '#888', marginTop: 'auto', flexShrink: 0 }}>
+              From {backtestData.length} backtests
+            </div>
+          </Card>
+        </Col>
+
+        {/* 卡片4: Avg Return */}
+        <Col span={6} style={{ display: 'flex' }}>
+          <Card 
+            size="small"
+            style={{ width: '100%', minHeight: '140px' }}
+            styles={{
+              body: { 
+                padding: '16px',
+                display: 'flex',
+                flexDirection: 'column',
+                height: '100%'
+              }
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', marginBottom: '12px', flexShrink: 0 }}>
+              <div style={{ 
+                background: getAverageReturn() >= 0 ? 'rgba(52, 168, 83, 0.1)' : 'rgba(234, 67, 53, 0.1)', 
+                borderRadius: '8px',
+                padding: '8px',
+                marginRight: '12px'
+              }}>
+                <Percent size={20} color={getAverageReturn() >= 0 ? '#34a853' : '#ea4335'} />
+              </div>
+              <div>
+                <div style={{ fontSize: '14px', color: '#666', fontWeight: '500' }}>Avg Return</div>
+                <div style={{ 
+                  fontSize: '22px', 
+                  fontWeight: '600',
+                  color: getAverageReturn() >= 0 ? '#34a853' : '#ea4335'
+                }}>
+                  {getAverageReturn() >= 0 ? '+' : ''}{safeToFixed(getAverageReturn(), 2)}%
+                </div>
+              </div>
+            </div>
+            <div style={{ flex: 1, minHeight: '20px' }}></div>
+            <div style={{ fontSize: '11px', color: '#888', marginTop: 'auto', flexShrink: 0 }}>
+              Across all backtests
+            </div>
           </Card>
         </Col>
       </Row>
 
-      {/* 市场活动模块 */}
+      {/* 市场活动模块 - 优化版 */}
       <Row gutter={[16, 16]}>
         <Col span={12}>
           <Card 
-            title="Recent Market Activity" 
+            title={
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <div style={{ 
+                  background: 'rgba(66, 133, 244, 0.1)', 
+                  borderRadius: '6px',
+                  padding: '4px'
+                }}>
+                  <TrendingUp size={16} color="#4285f4" />
+                </div>
+                <span style={{ fontSize: '18px', fontWeight: '600', color: '#333' }}>
+                  Recent Market Activity
+                </span>
+              </div>
+            }
             extra={
               <Button 
                 type="text" 
@@ -515,54 +658,201 @@ const Dashboard: React.FC = () => {
                 onClick={() => fetchMarketData(true)}
                 size="small"
                 loading={marketLoading}
-              />
+                style={{ 
+                  color: '#666',
+                  fontWeight: '500'
+                }}
+              >
+                Refresh
+              </Button>
             }
+            styles={{
+              body: { padding: '0' }
+            }}
           >
             {marketLoading ? (
-              <div style={{ textAlign: 'center', padding: '40px' }}>
-                <Spin />
-                <div style={{ marginTop: '16px', color: '#666' }}>Loading market data...</div>
+              <div style={{ 
+                textAlign: 'center', 
+                padding: '48px 24px',
+                background: '#fafafa'
+              }}>
+                <Spin size="large" />
+                <div style={{ 
+                  marginTop: '16px', 
+                  fontSize: '14px', 
+                  color: '#666',
+                  fontWeight: '500'
+                }}>
+                  Loading market data...
+                </div>
+                <div style={{ 
+                  marginTop: '8px', 
+                  fontSize: '12px', 
+                  color: '#999'
+                }}>
+                  Fetching real-time stock prices
+                </div>
               </div>
             ) : marketError ? (
-              <Empty
-                image={Empty.PRESENTED_IMAGE_SIMPLE}
-                description={
-                  <div>
-                    <div style={{ color: '#ff4d4f', marginBottom: '8px' }}>Failed to load market data</div>
-                    <Button type="primary" onClick={() => fetchMarketData(true)} icon={<ReloadOutlined />}>
-                      Retry
-                    </Button>
-                  </div>
-                }
-              />
+              <div style={{ 
+                textAlign: 'center', 
+                padding: '40px 24px',
+                background: '#fafafa'
+              }}>
+                <ExclamationCircleOutlined style={{ 
+                  color: '#ea4335', 
+                  fontSize: '32px', 
+                  marginBottom: '16px' 
+                }} />
+                <div style={{ 
+                  fontSize: '14px', 
+                  color: '#ea4335',
+                  fontWeight: '600',
+                  marginBottom: '8px'
+                }}>
+                  Failed to load market data
+                </div>
+                <div style={{ 
+                  fontSize: '12px', 
+                  color: '#999',
+                  marginBottom: '20px',
+                  maxWidth: '300px',
+                  margin: '0 auto 20px'
+                }}>
+                  Unable to connect to market data service. Please check your connection.
+                </div>
+                <Button 
+                  type="primary" 
+                  onClick={() => fetchMarketData(true)} 
+                  icon={<ReloadOutlined />}
+                  size="middle"
+                >
+                  Retry Connection
+                </Button>
+              </div>
             ) : marketData.length > 0 ? (
               <>
+                <div style={{ 
+                  background: '#f8f9fa',
+                  borderBottom: '1px solid #f0f0f0',
+                  padding: '12px 16px'
+                }}>
+                  <div style={{ 
+                    display: 'flex', 
+                    justifyContent: 'space-between',
+                    alignItems: 'center'
+                  }}>
+                    <div style={{ fontSize: '12px', color: '#666' }}>
+                      Showing {marketData.length} active stocks
+                    </div>
+                    <div style={{ fontSize: '11px', color: '#999' }}>
+                      Real-time data
+                    </div>
+                  </div>
+                </div>
                 <Table
                   columns={stockColumns}
                   dataSource={marketData}
                   rowKey="symbol"
                   pagination={false}
-                  size="small"
+                  size="middle"
                   onRow={(record) => ({
                     onClick: () => navigate('/market'),
-                    style: { cursor: 'pointer' }
+                    style: { 
+                      cursor: 'pointer',
+                      background: '#fff'
+                    }
                   })}
+                  rowClassName={() => 'market-table-row'}
+                  style={{ 
+                    border: 'none',
+                    borderRadius: '0'
+                  }}
+                  components={{
+                    header: {
+                      cell: (props: any) => (
+                        <th {...props} style={{ 
+                          ...props.style,
+                          background: '#f8f9fa',
+                          borderBottom: '2px solid #e8e8e8',
+                          padding: '12px 16px',
+                          fontWeight: '600'
+                        }} />
+                      ),
+                    },
+                    body: {
+                      cell: (props: any) => (
+                        <td {...props} style={{ 
+                          ...props.style,
+                          padding: '12px 16px',
+                          borderBottom: '1px solid #f5f5f5'
+                        }} />
+                      ),
+                    },
+                  }}
                 />
-                <div style={{ marginTop: '16px', textAlign: 'center' }}>
-                  <Button type="link" onClick={handleViewMarket}>
-                    View Full Market →
+                <div style={{ 
+                  padding: '16px',
+                  borderTop: '1px solid #f0f0f0',
+                  background: '#fafafa',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center'
+                }}>
+                  <div style={{ fontSize: '12px', color: '#666' }}>
+                    Click any row to view detailed analysis
+                  </div>
+                  <Button 
+                    type="primary" 
+                    onClick={handleViewMarket}
+                    size="small"
+                    style={{ 
+                      fontWeight: '500',
+                      background: '#4285f4',
+                      borderColor: '#4285f4'
+                    }}
+                  >
+                    View Full Market Dashboard
                   </Button>
                 </div>
               </>
             ) : (
-              <Empty
-                image={Empty.PRESENTED_IMAGE_SIMPLE}
-                description="No recent market data"
-              >
-                <Button type="primary" onClick={handleViewMarket}>
-                  Go to Market
+              <div style={{ 
+                textAlign: 'center', 
+                padding: '48px 24px',
+                background: '#fafafa'
+              }}>
+                <Empty
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                  description={
+                    <div>
+                      <div style={{ 
+                        fontSize: '14px', 
+                        color: '#666',
+                        fontWeight: '600',
+                        marginBottom: '8px'
+                      }}>
+                        No recent market data
+                      </div>
+                      <div style={{ 
+                        fontSize: '12px', 
+                        color: '#999',
+                        marginBottom: '20px'
+                      }}>
+                        Market data service is currently unavailable
+                      </div>
+                    </div>
+                  }
+                />
+                <Button 
+                  type="primary" 
+                  onClick={handleViewMarket}
+                  size="middle"
+                  style={{ marginTop: '16px' }}
+                >
+                  Go to Market Overview
                 </Button>
-              </Empty>
+              </div>
             )}
           </Card>
         </Col>
@@ -609,85 +899,169 @@ const Dashboard: React.FC = () => {
               />
             ) : latestBacktest ? (
               <div>
-                <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
+                {/* 基本信息行 */}
+                <Row gutter={[16, 16]} style={{ marginBottom: 20 }}>
                   <Col span={12}>
-                    <div><strong>Symbol:</strong> {latestBacktest.symbol || 'Unknown'}</div>
-                    <div><strong>Strategy:</strong> {latestBacktest.strategy || 'Unknown'}</div>
-                    <div><strong>Period:</strong> {latestBacktest.startDate} to {latestBacktest.endDate}</div>
-                    <div><strong>Capital:</strong> ${safeNumber(latestBacktest.initialCapital).toLocaleString()}</div>
+                    <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                      <div style={{ 
+                        background: 'rgba(66, 133, 244, 0.1)', 
+                        borderRadius: '6px',
+                        padding: '4px',
+                        marginRight: '10px'
+                      }}>
+                        <Target size={14} color="#4285f4" />
+                      </div>
+                      <div>
+                        <div style={{ fontSize: '24px', fontWeight: '600', color: '#333' }}>
+                          {latestBacktest.symbol || 'Unknown'}
+                        </div>
+                        <div style={{ fontSize: '16px', color: '#666' }}>
+                          {latestBacktest.strategy || 'Unknown'} Strategy
+                        </div>
+                      </div>
+                    </div>
+                    <div style={{ fontSize: '16px', color: '#666', lineHeight: '1.6' }}>
+                      <div>Period: {latestBacktest.startDate} to {latestBacktest.endDate}</div>
+                      <div>Capital: ${safeNumber(latestBacktest.initialCapital).toLocaleString()}</div>
+                    </div>
                   </Col>
                   <Col span={12}>
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+                      <div style={{
+                        background: latestBacktest.status === 'completed' ? 'rgba(52, 168, 83, 0.1)' : 
+                                   latestBacktest.status === 'running' ? 'rgba(66, 133, 244, 0.1)' : 'rgba(234, 67, 53, 0.1)',
+                        borderRadius: '12px',
+                        padding: '4px 12px',
+                        fontSize: '11px',
+                        fontWeight: '600',
+                        color: latestBacktest.status === 'completed' ? '#34a853' : 
+                               latestBacktest.status === 'running' ? '#4285f4' : '#ea4335',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.5px'
+                      }}>
+                        {latestBacktest.status || 'UNKNOWN'}
+                      </div>
+                    </div>
+                    
+                    {/* 强化 Total Return 主指标 */}
                     <div style={{ textAlign: 'right' }}>
-                      <Tag color={latestBacktest.status === 'completed' ? 'green' : 
-                                 latestBacktest.status === 'running' ? 'blue' : 'red'}>
-                        {latestBacktest.status?.toUpperCase()}
-                      </Tag>
-                    </div>
-                    <div style={{ marginTop: '8px' }}>
-                      <Statistic
-                        title="Total Return"
-                        value={safeNumber(latestBacktest.totalReturn)}
-                        suffix="%"
-                        valueStyle={{ 
-                          color: safeNumber(latestBacktest.totalReturn) >= 0 ? '#3f8600' : '#cf1322',
-                          fontSize: '24px'
-                        }}
-                      />
+                      <div style={{ fontSize: '16px', color: '#666', marginBottom: '4px' }}>Total Return</div>
+                      <div style={{ 
+                        fontSize: '32px', 
+                        fontWeight: '700',
+                        color: safeNumber(latestBacktest.totalReturn) >= 0 ? '#34a853' : '#ea4335',
+                        lineHeight: '1.2'
+                      }}>
+                        {safeNumber(latestBacktest.totalReturn) >= 0 ? '+' : ''}{safeToFixed(safeNumber(latestBacktest.totalReturn), 2)}%
+                      </div>
+                      <div style={{ 
+                        fontSize: '15px', 
+                        color: safeNumber(latestBacktest.totalReturn) >= 0 ? '#34a853' : '#ea4335',
+                        marginTop: '4px'
+                      }}>
+                        {safeNumber(latestBacktest.totalReturn) >= 0 ? 'Profit' : 'Loss'}
+                      </div>
                     </div>
                   </Col>
                 </Row>
                 
-                <Row gutter={[16, 16]}>
-                  <Col span={8}>
-                    <Statistic
-                      title="Sharpe Ratio"
-                      value={safeToFixed(safeNumber(latestBacktest.sharpeRatio), 2)}
-                      valueStyle={{ 
-                        color: safeNumber(latestBacktest.sharpeRatio) >= 1 ? '#3f8600' : 
-                               safeNumber(latestBacktest.sharpeRatio) >= 0 ? '#faad14' : '#cf1322',
-                        fontSize: '18px'
-                      }}
-                    />
-                  </Col>
-                  <Col span={8}>
-                    <Statistic
-                      title="Max Drawdown"
-                      value={safeToFixed(safeNumber(latestBacktest.maxDrawdown), 2)}
-                      suffix="%"
-                      valueStyle={{ 
-                        color: '#cf1322',
-                        fontSize: '18px'
-                      }}
-                    />
-                  </Col>
-                  <Col span={8}>
-                    <Statistic
-                      title="Win Rate"
-                      value={safeToFixed(safeNumber(latestBacktest.winRate), 1)}
-                      suffix="%"
-                      valueStyle={{ 
-                        color: safeNumber(latestBacktest.winRate) >= 60 ? '#3f8600' : 
-                               safeNumber(latestBacktest.winRate) >= 40 ? '#faad14' : '#cf1322',
-                        fontSize: '18px'
-                      }}
-                    />
-                  </Col>
-                </Row>
+                {/* 三个关键指标行 - 统一排版 */}
+                <div style={{ 
+                  background: '#f8f9fa', 
+                  borderRadius: '8px',
+                  padding: '16px',
+                  marginBottom: '20px'
+                }}>
+                  <div style={{ fontSize: '16px', color: '#666', fontWeight: '600', marginBottom: '12px' }}>
+                    Performance Metrics
+                  </div>
+                  <Row gutter={[16, 8]}>
+                    <Col span={8}>
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: '4px' }}>
+                        <div style={{ marginRight: '8px' }}>
+                          <LineChart size={14} color={safeNumber(latestBacktest.sharpeRatio) >= 1 ? '#34a853' : 
+                                                      safeNumber(latestBacktest.sharpeRatio) >= 0 ? '#faad14' : '#ea4335'} />
+                        </div>
+                        <div style={{ fontSize: '14px', color: '#666' }}>Sharpe</div>
+                      </div>
+                      <div style={{ 
+                        fontSize: '24px', 
+                        fontWeight: '600',
+                        color: safeNumber(latestBacktest.sharpeRatio) >= 1 ? '#34a853' : 
+                               safeNumber(latestBacktest.sharpeRatio) >= 0 ? '#faad14' : '#ea4335'
+                      }}>
+                        {safeToFixed(safeNumber(latestBacktest.sharpeRatio), 2)}
+                      </div>
+                    </Col>
+                    <Col span={8}>
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: '4px' }}>
+                        <div style={{ marginRight: '8px' }}>
+                          <TrendingDown size={14} color="#ea4335" />
+                        </div>
+                        <div style={{ fontSize: '14px', color: '#666' }}>Max DD</div>
+                      </div>
+                      <div style={{ 
+                        fontSize: '24px', 
+                        fontWeight: '600',
+                        color: '#ea4335'
+                      }}>
+                        {safeToFixed(safeNumber(latestBacktest.maxDrawdown), 2)}%
+                      </div>
+                    </Col>
+                    <Col span={8}>
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: '4px' }}>
+                        <div style={{ marginRight: '8px' }}>
+                          <Award size={14} color={safeNumber(latestBacktest.winRate) >= 60 ? '#34a853' : 
+                                                  safeNumber(latestBacktest.winRate) >= 40 ? '#faad14' : '#ea4335'} />
+                        </div>
+                        <div style={{ fontSize: '14px', color: '#666' }}>Win Rate</div>
+                      </div>
+                      <div style={{ 
+                        fontSize: '24px', 
+                        fontWeight: '600',
+                        color: safeNumber(latestBacktest.winRate) >= 60 ? '#34a853' : 
+                               safeNumber(latestBacktest.winRate) >= 40 ? '#faad14' : '#ea4335'
+                      }}>
+                        {safeToFixed(safeNumber(latestBacktest.winRate), 1)}%
+                      </div>
+                    </Col>
+                  </Row>
+                </div>
                 
-                <div style={{ marginTop: '16px', textAlign: 'center' }}>
+                {/* 按钮区 - 更整齐专业 */}
+                <div style={{ 
+                  display: 'flex', 
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  paddingTop: '16px',
+                  borderTop: '1px solid #f0f0f0'
+                }}>
+                  <div style={{ fontSize: '13px', color: '#888' }}>
+                    Backtest ID: {latestBacktest.backtestId?.substring(0, 8) || 'N/A'}
+                  </div>
                   <Space>
                     <Button 
                       type="primary"
+                      size="small"
                       icon={<EyeOutlined />}
                       onClick={() => latestBacktest.backtestId && handleViewBacktest(latestBacktest.backtestId)}
+                      style={{ 
+                        background: '#4285f4',
+                        borderColor: '#4285f4',
+                        fontWeight: '500',
+                        fontSize: '14px'
+                      }}
                     >
                       View Details
                     </Button>
                     <Button 
                       type="default"
-                      onClick={() => navigate('/analysis')}
+                      size="small"
+                      icon={<BarChart3 size={14} />}
+                      onClick={() => latestBacktest.backtestId && navigate(`/analytics?backtestId=${latestBacktest.backtestId}`)}
+                      style={{ fontWeight: '500', fontSize: '14px' }}
                     >
-                      Analyze Results
+                      Analyze
                     </Button>
                   </Space>
                 </div>
@@ -695,62 +1069,178 @@ const Dashboard: React.FC = () => {
             ) : (
               <Empty
                 image={Empty.PRESENTED_IMAGE_SIMPLE}
-                description="No backtest history yet"
-              >
-                <Button type="primary" onClick={handleRunBacktest}>
-                  Run Your First Backtest
-                </Button>
-              </Empty>
+                description={
+                  <div style={{ textAlign: 'center' }}>
+                    <div style={{ fontSize: '14px', color: '#666', marginBottom: '8px' }}>No backtest history yet</div>
+                    <div style={{ fontSize: '12px', color: '#999', marginBottom: '16px' }}>
+                      Run your first backtest to see results here
+                    </div>
+                    <Button 
+                      type="primary" 
+                      onClick={handleRunBacktest}
+                      icon={<PlayCircleOutlined />}
+                      style={{ fontWeight: '500' }}
+                    >
+                      Run First Backtest
+                    </Button>
+                  </div>
+                }
+              />
             )}
           </Card>
         </Col>
       </Row>
 
-      {/* 快速操作 */}
-      <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
+      {/* 快速操作 - 优化版 */}
+      <Row gutter={[16, 16]} style={{ marginTop: 24 }}>
         <Col span={24}>
-          <Card title="Quick Actions" size="small">
-            <Row gutter={16}>
+          <Card 
+            title={
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <div style={{ 
+                  background: 'rgba(66, 133, 244, 0.1)', 
+                  borderRadius: '6px',
+                  padding: '4px'
+                }}>
+                  <PlayCircle size={16} color="#4285f4" />
+                </div>
+                <span style={{ fontSize: '16px', fontWeight: '600', color: '#333' }}>
+                  Quick Actions
+                </span>
+              </div>
+            }
+            styles={{
+              body: { padding: '20px 24px' }
+            }}
+          >
+            <Row gutter={[20, 16]}>
               <Col span={6}>
                 <Button 
                   type="default" 
                   block
-                  icon={<LineChartOutlined />}
+                  icon={<Search size={16} />}
                   onClick={handleViewMarket}
+                  style={{ 
+                    height: '44px',
+                    fontSize: '14px',
+                    fontWeight: '500',
+                    color: '#333',
+                    borderColor: '#d9d9d9',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '8px'
+                  }}
                 >
                   Browse Market
                 </Button>
+                <div style={{ 
+                  fontSize: '12px', 
+                  color: '#666', 
+                  marginTop: '8px',
+                  textAlign: 'center'
+                }}>
+                  Explore stocks & trends
+                </div>
               </Col>
               <Col span={6}>
                 <Button 
                   type="default" 
                   block
-                  icon={<PlayCircleOutlined />}
+                  icon={<PlayCircle size={16} />}
                   onClick={handleRunBacktest}
+                  style={{ 
+                    height: '44px',
+                    fontSize: '14px',
+                    fontWeight: '500',
+                    color: '#333',
+                    borderColor: '#d9d9d9',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '8px'
+                  }}
                 >
                   Run Backtest
                 </Button>
+                <div style={{ 
+                  fontSize: '12px', 
+                  color: '#666', 
+                  marginTop: '8px',
+                  textAlign: 'center'
+                }}>
+                  Test strategies
+                </div>
               </Col>
               <Col span={6}>
                 <Button 
                   type="default" 
                   block
+                  icon={<BarChart size={16} />}
                   onClick={handleViewAnalysis}
+                  style={{ 
+                    height: '44px',
+                    fontSize: '14px',
+                    fontWeight: '500',
+                    color: '#333',
+                    borderColor: '#d9d9d9',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '8px'
+                  }}
                 >
                   View Analytics
                 </Button>
+                <div style={{ 
+                  fontSize: '12px', 
+                  color: '#666', 
+                  marginTop: '8px',
+                  textAlign: 'center'
+                }}>
+                  Performance insights
+                </div>
               </Col>
               <Col span={6}>
                 <Button 
                   type="default" 
                   block
+                  icon={<RefreshCw size={16} />}
                   onClick={fetchDashboardData}
-                  icon={<ReloadOutlined />}
+                  style={{ 
+                    height: '44px',
+                    fontSize: '14px',
+                    fontWeight: '500',
+                    color: '#333',
+                    borderColor: '#d9d9d9',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '8px'
+                  }}
                 >
                   Refresh Dashboard
                 </Button>
+                <div style={{ 
+                  fontSize: '12px', 
+                  color: '#666', 
+                  marginTop: '8px',
+                  textAlign: 'center'
+                }}>
+                  Update all data
+                </div>
               </Col>
             </Row>
+            <div style={{ 
+              marginTop: '20px',
+              paddingTop: '16px',
+              borderTop: '1px solid #f0f0f0',
+              fontSize: '12px',
+              color: '#999',
+              textAlign: 'center'
+            }}>
+              Click any action to navigate or refresh dashboard data
+            </div>
           </Card>
         </Col>
       </Row>

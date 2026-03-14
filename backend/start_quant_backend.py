@@ -41,7 +41,21 @@ def fetch_real_stock_data(symbol):
         change = current_price - prev_close
         change_percent = (change / prev_close * 100) if prev_close else 0
         
-        return {
+        # 获取 PE 相关字段，优先使用 trailingPE
+        trailing_pe = info.get('trailingPE')
+        forward_pe = info.get('forwardPE')
+        pe_ratio = info.get('peRatio')
+        
+        # 确定要返回的 PE 值，优先级：trailingPE > forwardPE > peRatio
+        pe_value = None
+        if trailing_pe is not None:
+            pe_value = trailing_pe
+        elif forward_pe is not None:
+            pe_value = forward_pe
+        elif pe_ratio is not None:
+            pe_value = pe_ratio
+        
+        stock_data = {
             "symbol": symbol,
             "name": info.get('longName', symbol),
             "price": round(current_price, 2),
@@ -52,6 +66,17 @@ def fetch_real_stock_data(symbol):
             "sector": info.get('sector', 'Unknown'),
             "currency": info.get('currency', 'USD')
         }
+        
+        # 添加 PE 相关字段
+        if pe_value is not None:
+            stock_data["peRatio"] = round(pe_value, 2)
+            # 同时保留原始字段名，方便前端识别
+            if trailing_pe is not None:
+                stock_data["trailingPE"] = round(trailing_pe, 2)
+            if forward_pe is not None:
+                stock_data["forwardPE"] = round(forward_pe, 2)
+        
+        return stock_data
     except Exception as e:
         print(f"Error fetching data for {symbol}: {e}")
         return None
@@ -680,6 +705,378 @@ def calculate_backtest_metrics(hist_data, initial_capital):
     print(f"DEBUG: Trades: {trades}, Win rate: {win_rate:.1f}%, Avg return per trade: {avg_return_per_trade:.2f}%")
     return result
 
+def calculate_portfolio_metrics_from_equity_curve(equity_curve, initial_capital):
+    """Calculate portfolio metrics from equity curve"""
+    if not equity_curve or len(equity_curve) < 2:
+        print("Warning: Insufficient equity curve data for portfolio metrics calculation")
+        return {
+            "totalReturn": 0.0,
+            "annualizedReturn": 0.0,
+            "sharpeRatio": 0.0,
+            "maxDrawdown": 0.0,
+            "calmarRatio": 0.0,
+            "profitLoss": 0.0,
+            "volatility": 0.0
+        }
+    
+    try:
+        import pandas as pd
+        import numpy as np
+        
+        # 将权益曲线转换为 DataFrame
+        df = pd.DataFrame(equity_curve)
+        df['date'] = pd.to_datetime(df['date'])
+        df = df.sort_values('date')
+        
+        # 计算日回报率
+        df['equity_returns'] = df['equity'].pct_change()
+        
+        # 计算总回报
+        if len(df) > 0:
+            initial_equity = df['equity'].iloc[0]
+            final_equity = df['equity'].iloc[-1]
+            total_return_pct = ((final_equity - initial_equity) / initial_equity) * 100
+        else:
+            total_return_pct = 0.0
+        
+        # 计算年化回报
+        annualized_return = 0.0
+        if len(df) > 1 and total_return_pct > -100:  # 避免数学错误
+            try:
+                # 估算交易天数
+                trading_days = len(df)
+                total_return_decimal = total_return_pct / 100
+                annualized_return = ((1 + total_return_decimal) ** (252 / trading_days) - 1) * 100
+            except:
+                annualized_return = 0.0
+        
+        # 计算夏普比率
+        sharpe_ratio = 0.0
+        volatility = 0.0  # 新增：波动率
+        if len(df) > 1 and 'equity_returns' in df.columns:
+            daily_returns = df['equity_returns'].dropna()
+            if len(daily_returns) > 0:
+                # 计算波动率：日回报标准差 * sqrt(252) * 100
+                # 即使标准差为0，也应该计算波动率（表示没有波动）
+                daily_std = daily_returns.std()
+                # 调试信息
+                print(f"DEBUG: volatility calculation - daily_returns length: {len(daily_returns)}, daily_std: {daily_std}")
+                if pd.isna(daily_std):
+                    daily_std = 0.0
+                    print(f"DEBUG: daily_std is NaN, setting to 0.0")
+                volatility = daily_std * (252 ** 0.5) * 100
+                print(f"DEBUG: volatility result: {volatility}")
+                
+                # 计算夏普比率（需要标准差>0）
+                if daily_std > 0:
+                    sharpe_ratio = (daily_returns.mean() / daily_std) * (252 ** 0.5)
+                
+                # 计算索提诺比率（Sortino Ratio）
+                sortino_ratio = 0.0
+                # 只考虑负收益作为下行风险
+                downside_returns = daily_returns[daily_returns < 0]
+                if len(downside_returns) > 1:  # 需要至少2个点才能计算标准差
+                    downside_std = downside_returns.std()
+                    if pd.isna(downside_std):
+                        downside_std = 0.0
+                    if downside_std > 0:
+                        mean_return = daily_returns.mean()
+                        sortino_ratio = (mean_return * 252) / (downside_std * (252 ** 0.5))
+                        print(f"DEBUG: sortino_ratio calculation - downside_returns: {len(downside_returns)}, downside_std: {downside_std}, sortino_ratio: {sortino_ratio}")
+        
+        # 计算最大回撤
+        max_drawdown_pct = 0.0
+        if len(df) > 0:
+            # 计算累积回报
+            cumulative = (1 + df['equity_returns'].fillna(0)).cumprod()
+            running_max = cumulative.expanding().max()
+            drawdown = (cumulative - running_max) / running_max
+            max_drawdown_pct = drawdown.min() * 100 if len(drawdown) > 0 else 0.0
+        
+        # 计算 Calmar 比率
+        calmar_ratio = 0.0
+        if max_drawdown_pct < 0 and annualized_return != 0:
+            calmar_ratio = annualized_return / abs(max_drawdown_pct)
+        
+        # 计算盈亏
+        profit_loss = initial_capital * (total_return_pct / 100)
+        
+        return {
+            "totalReturn": round(total_return_pct, 2),
+            "annualizedReturn": round(annualized_return, 2),
+            "sharpeRatio": round(sharpe_ratio, 2),
+            "sortinoRatio": round(sortino_ratio, 2),  # 新增：索提诺比率
+            "maxDrawdown": round(max_drawdown_pct, 2),
+            "calmarRatio": round(calmar_ratio, 2),
+            "profitLoss": round(profit_loss, 2),
+            "volatility": round(volatility, 2)  # 新增：波动率
+        }
+        
+    except Exception as e:
+        print(f"Error calculating portfolio metrics from equity curve: {e}")
+        return {
+            "totalReturn": 0.0,
+            "annualizedReturn": 0.0,
+            "sharpeRatio": 0.0,
+            "sortinoRatio": 0.0,  # 新增：索提诺比率
+            "maxDrawdown": 0.0,
+            "calmarRatio": 0.0,
+            "profitLoss": 0.0,
+            "volatility": 0.0
+        }
+
+def run_portfolio_backtest(symbols, strategy, start_date, end_date, initial_capital):
+    """Run portfolio backtest with equal weight allocation"""
+    print(f"Starting portfolio backtest for symbols: {symbols}")
+    
+    all_results = []
+    all_equity_curves = []
+    all_trades_lists = []  # 新增：收集所有股票的 trades
+    
+    # 对每个股票运行单独的回测
+    for i, symbol in enumerate(symbols):
+        print(f"  Running backtest for symbol {i+1}/{len(symbols)}: {symbol}")
+        
+        # 为每个股票分配等权重资金
+        symbol_capital = initial_capital / len(symbols)
+        
+        # 运行单个股票回测
+        symbol_result = run_real_backtest(symbol, strategy, start_date, end_date, symbol_capital)
+        
+        if symbol_result:
+            all_results.append(symbol_result)
+            all_equity_curves.append(symbol_result.get('equityCurve', []))
+            
+            # 收集 trades，并添加 symbol 字段
+            symbol_trades = symbol_result.get('tradesList', [])
+            if symbol_trades:
+                # 为每个 trade 添加 symbol 字段
+                for trade in symbol_trades:
+                    trade['symbol'] = symbol
+                all_trades_lists.extend(symbol_trades)
+        else:
+            print(f"  Warning: Backtest failed for {symbol}, using default values")
+            # 使用默认值继续
+            all_results.append({
+                "totalReturn": 0.0,
+                "annualizedReturn": 0.0,
+                "profitLoss": 0.0,
+                "sharpeRatio": 0.0,
+                "calmarRatio": 0.0,
+                "maxDrawdown": 0.0,
+                "winRate": 0.0,
+                "trades": 0,
+                "avgReturnPerTrade": 0.0,
+                "equityCurve": []
+            })
+            all_equity_curves.append([])
+    
+    # 计算 portfolio 指标
+    print(f"Calculating portfolio metrics from {len(all_results)} individual results")
+    
+    # 总交易次数（保持不变）
+    total_trades = sum([r.get('trades', 0) for r in all_results])
+    
+    # 平均胜率（暂时保持简单平均，因为需要所有交易的详细信息）
+    win_rates = [r.get('winRate', 0.0) for r in all_results]
+    portfolio_win_rate = sum(win_rates) / len(win_rates) if win_rates else 0.0
+    
+    # 平均每笔交易回报（暂时保持简单平均）
+    avg_returns_per_trade = [r.get('avgReturnPerTrade', 0.0) for r in all_results]
+    portfolio_avg_return_per_trade = sum(avg_returns_per_trade) / len(avg_returns_per_trade) if avg_returns_per_trade else 0.0
+    
+    # 计算 portfolio 权益曲线
+    portfolio_equity_curve = []
+    
+    if all_equity_curves and all(len(curve) > 0 for curve in all_equity_curves):
+        # 找到最短的权益曲线长度
+        min_length = min(len(curve) for curve in all_equity_curves)
+        
+        # 对每个时间点计算平均权益
+        for i in range(min_length):
+            # 获取所有股票在该时间点的权益
+            equities_at_time = []
+            dates_at_time = []
+            
+            for curve in all_equity_curves:
+                if i < len(curve):
+                    equities_at_time.append(curve[i].get('equity', 0))
+                    dates_at_time.append(curve[i].get('date', ''))
+            
+            if equities_at_time:
+                # 计算平均权益
+                avg_equity = sum(equities_at_time) / len(equities_at_time)
+                
+                # 使用第一个有效日期
+                date = dates_at_time[0] if dates_at_time else ''
+                
+                portfolio_equity_curve.append({
+                    "date": date,
+                    "equity": round(avg_equity, 2)
+                })
+    else:
+        # 如果没有权益曲线数据，生成一个简单的
+        print("Warning: No equity curve data available, generating simple portfolio curve")
+        # 临时计算平均总回报用于生成简单曲线
+        temp_total_returns = [r.get('totalReturn', 0.0) for r in all_results]
+        temp_portfolio_total_return = sum(temp_total_returns) / len(temp_total_returns) if temp_total_returns else 0.0
+        
+        for i in range(250):
+            progress = i / 249
+            equity = initial_capital * (1 + (temp_portfolio_total_return / 100) * progress)
+            date_days_ago = 365 - int(progress * 365)
+            date = (datetime.now() - timedelta(days=date_days_ago)).strftime('%Y-%m-%d')
+            portfolio_equity_curve.append({"date": date, "equity": round(equity, 2)})
+    
+    # 基于 portfolio equity curve 重新计算核心指标
+    print("Calculating portfolio metrics from equity curve...")
+    portfolio_metrics = calculate_portfolio_metrics_from_equity_curve(portfolio_equity_curve, initial_capital)
+    
+    # 使用基于权益曲线计算的指标
+    portfolio_total_return = portfolio_metrics["totalReturn"]
+    portfolio_annualized_return = portfolio_metrics["annualizedReturn"]
+    portfolio_sharpe_ratio = portfolio_metrics["sharpeRatio"]
+    portfolio_max_drawdown = portfolio_metrics["maxDrawdown"]
+    portfolio_calmar_ratio = portfolio_metrics["calmarRatio"]
+    portfolio_profit_loss = portfolio_metrics["profitLoss"]
+    portfolio_volatility = portfolio_metrics["volatility"]  # 新增：波动率
+    portfolio_sortino_ratio = portfolio_metrics["sortinoRatio"]  # 新增：索提诺比率
+    
+    # 合并并排序所有 trades
+    portfolio_trades_list = []
+    if all_trades_lists:
+        # 按 entryDate 排序（最新的在前）
+        portfolio_trades_list = sorted(all_trades_lists, key=lambda x: x.get('entryDate', ''), reverse=True)
+        print(f"  Merged {len(portfolio_trades_list)} trades from all symbols")
+    
+    # 基于 portfolio_trades_list 计算 profitFactor
+    portfolio_profit_factor = 0.0
+    if portfolio_trades_list and len(portfolio_trades_list) > 0:
+        # 计算总盈利和总亏损
+        gross_profit = sum(trade.get('pnl', 0) for trade in portfolio_trades_list if trade.get('pnl', 0) > 0)
+        gross_loss = sum(abs(trade.get('pnl', 0)) for trade in portfolio_trades_list if trade.get('pnl', 0) < 0)
+        
+        if gross_loss > 0:
+            portfolio_profit_factor = gross_profit / gross_loss
+        else:
+            portfolio_profit_factor = 0.0
+        
+        print(f"  Profit factor calculation: gross_profit={gross_profit:.2f}, gross_loss={gross_loss:.2f}, profit_factor={portfolio_profit_factor:.2f}")
+        
+        # 计算 expectancy（期望值）
+        portfolio_expectancy = 0.0
+        if portfolio_trades_list and len(portfolio_trades_list) > 0:
+            # 分离盈利和亏损交易
+            winning_trades = [trade for trade in portfolio_trades_list if trade.get('pnl', 0) > 0]
+            losing_trades = [trade for trade in portfolio_trades_list if trade.get('pnl', 0) < 0]
+            
+            total_trades_count = len(portfolio_trades_list)
+            winning_trades_count = len(winning_trades)
+            losing_trades_count = len(losing_trades)
+            
+            # 计算平均盈利和平均亏损
+            avg_win = 0.0
+            if winning_trades_count > 0:
+                avg_win = sum(trade.get('pnl', 0) for trade in winning_trades) / winning_trades_count
+            
+            avg_loss = 0.0
+            if losing_trades_count > 0:
+                # avg_loss 使用亏损交易绝对值（正数）
+                avg_loss = sum(abs(trade.get('pnl', 0)) for trade in losing_trades) / losing_trades_count
+            
+            # 计算胜率和败率
+            win_rate_decimal = winning_trades_count / total_trades_count if total_trades_count > 0 else 0.0
+            loss_rate_decimal = losing_trades_count / total_trades_count if total_trades_count > 0 else 0.0
+            
+            # 计算 expectancy: (胜率 × 平均盈利) - (败率 × 平均亏损)
+            portfolio_expectancy = (win_rate_decimal * avg_win) - (loss_rate_decimal * avg_loss)
+            
+            print(f"  Expectancy calculation: total_trades={total_trades_count}, winning={winning_trades_count}, losing={losing_trades_count}")
+            print(f"    avg_win={avg_win:.2f}, avg_loss={avg_loss:.2f}, win_rate={win_rate_decimal:.3f}, loss_rate={loss_rate_decimal:.3f}")
+            print(f"    expectancy={portfolio_expectancy:.2f}")
+        
+        # 计算 exposure（持仓时间占比）- 最小近似方案
+        portfolio_exposure = 0.0
+        if portfolio_trades_list and len(portfolio_trades_list) > 0:
+            try:
+                import pandas as pd
+                from datetime import datetime, timedelta
+                
+                # 近似假设：回测期为1年（252个交易日）
+                total_backtest_days = 252
+                
+                # 按 symbol 分组交易
+                trades_by_symbol = {}
+                for trade in portfolio_trades_list:
+                    symbol = trade.get('symbol', 'UNKNOWN')
+                    if symbol not in trades_by_symbol:
+                        trades_by_symbol[symbol] = []
+                    trades_by_symbol[symbol].append(trade)
+                
+                # 计算每个 symbol 的持仓天数
+                total_holding_days = 0
+                symbol_count = len(trades_by_symbol)
+                
+                for symbol, trades in trades_by_symbol.items():
+                    # 按 entryDate 排序
+                    sorted_trades = sorted(trades, key=lambda x: x.get('entryDate', ''))
+                    
+                    # 简单估算：每个交易平均持仓 holding_days 天
+                    symbol_holding_days = 0
+                    for trade in sorted_trades:
+                        holding_days = trade.get('holdingDays', 0)
+                        if holding_days > 0:
+                            symbol_holding_days += holding_days
+                        else:
+                            # 如果没有 holdingDays 字段，估算为5天（典型短期交易）
+                            symbol_holding_days += 5
+                    
+                    # 限制不超过总回测天数
+                    symbol_holding_days = min(symbol_holding_days, total_backtest_days)
+                    total_holding_days += symbol_holding_days
+                
+                # 计算组合 exposure
+                if symbol_count > 0 and total_backtest_days > 0:
+                    # 组合 exposure = 总持仓天数 / (总回测天数 × 股票数量)
+                    portfolio_exposure = (total_holding_days / (total_backtest_days * symbol_count)) * 100
+                    portfolio_exposure = min(portfolio_exposure, 100.0)  # 限制不超过100%
+                
+                print(f"  Exposure calculation: symbol_count={symbol_count}, total_holding_days={total_holding_days}, total_backtest_days={total_backtest_days}")
+                print(f"    exposure={portfolio_exposure:.1f}% (approximate)")
+                
+            except Exception as e:
+                print(f"  Error calculating exposure: {e}")
+                portfolio_exposure = 0.0
+    
+    # 构建 portfolio 结果
+    portfolio_result = {
+        "totalReturn": round(portfolio_total_return, 2),
+        "annualizedReturn": round(portfolio_annualized_return, 2),
+        "profitLoss": round(portfolio_profit_loss, 2),
+        "sharpeRatio": round(portfolio_sharpe_ratio, 2),
+        "sortinoRatio": round(portfolio_sortino_ratio, 2),  # 新增：索提诺比率
+        "calmarRatio": round(portfolio_calmar_ratio, 2),
+        "maxDrawdown": round(portfolio_max_drawdown, 2),
+        "winRate": round(portfolio_win_rate, 1),  # 暂时保持简单平均
+        "trades": total_trades,
+        "avgReturnPerTrade": round(portfolio_avg_return_per_trade, 2),  # 暂时保持简单平均
+        "profitFactor": round(portfolio_profit_factor, 2),  # 新增：基于真实交易计算的 profit factor
+        "expectancy": round(portfolio_expectancy, 2),  # 新增：期望值
+        "volatility": round(portfolio_volatility, 2),  # 新增：基于权益曲线计算的波动率
+        "exposure": round(portfolio_exposure, 1),  # 新增：持仓时间占比（近似）
+        "equityCurve": portfolio_equity_curve,
+        "tradesList": portfolio_trades_list,  # 新增：合并后的 trades
+        # Portfolio 模式不包含 chartData，因为多个股票没有统一的 price/volume 图表
+        "buyHoldReturn": 0.0,  # 暂时设为0
+        "buyHoldEquitySeries": [],  # 暂时为空
+        "monthlyReturns": [],  # 暂时为空
+        "rollingSharpeRatio": []  # 暂时为空
+    }
+    
+    print(f"Portfolio backtest completed. Total return: {portfolio_total_return:.2f}%, Sharpe: {portfolio_sharpe_ratio:.2f}, Total trades: {total_trades}")
+    print(f"  Metrics source: equity curve (not simple average of individual stocks)")
+    return portfolio_result
+
 def run_real_backtest(symbol, strategy, start_date, end_date, initial_capital):
     """Run a simple backtest using Yahoo Finance historical data"""
     # 强制记录函数调用
@@ -807,23 +1204,41 @@ def run_backtest():
     
     data = request.get_json()
     
-    symbol = data.get('symbol', 'AAPL')
+    # 支持 symbols 数组和 symbol 字段的向后兼容
+    symbols = data.get('symbols')
+    if symbols is None:
+        # 如果没有 symbols 字段，使用 symbol 字段
+        symbol_str = data.get('symbol', 'AAPL')
+        # 解析逗号分隔的字符串为数组
+        symbols = [s.strip().upper() for s in symbol_str.split(',') if s.strip()]
+    
     strategy = data.get('strategy', 'moving_average')
     start_date = data.get('startDate', '2023-01-01')
     end_date = data.get('endDate', '2024-01-01')
     initial_capital = data.get('initialCapital', 100000)
     
-    print(f"Symbol: {symbol}, Strategy: {strategy}, Start: {start_date}, End: {end_date}, Capital: {initial_capital}")
+    print(f"Symbols: {symbols}, Strategy: {strategy}, Start: {start_date}, End: {end_date}, Capital: {initial_capital}")
     
     # Generate backtest ID
-    backtest_id = f"bt_{int(time.time())}_{symbol}"
+    backtest_id = f"bt_{int(time.time())}_{'_'.join(symbols[:3])}" if len(symbols) > 1 else f"bt_{int(time.time())}_{symbols[0]}"
     
     # Define which strategies are real vs simulated
     real_strategies = ['moving_average', 'rsi', 'macd', 'momentum']
     simulated_strategies = ['bollinger']
     
-    # Try to run real backtest
-    results = run_real_backtest(symbol, strategy, start_date, end_date, initial_capital)
+    # 判断是否为 portfolio 模式
+    is_portfolio = len(symbols) > 1
+    
+    if is_portfolio:
+        print(f"Running PORTFOLIO backtest for {len(symbols)} symbols: {symbols}")
+        # 执行 portfolio backtest
+        results = run_portfolio_backtest(symbols, strategy, start_date, end_date, initial_capital)
+    else:
+        # 单股票模式
+        symbol = symbols[0]
+        print(f"Running SINGLE stock backtest for symbol: {symbol}")
+        # Try to run real backtest
+        results = run_real_backtest(symbol, strategy, start_date, end_date, initial_capital)
     sys.stderr.write(f"DEBUG: run_real_backtest returned: {results is not None}\n")
     sys.stderr.flush()
     if results:
@@ -955,7 +1370,7 @@ def run_backtest():
         "results": results,
         "parameters": {
             "strategy": strategy,
-            "symbols": [symbol],
+            "symbols": symbols,  # 使用完整的 symbols 数组
             "period": f"{start_date} to {end_date}",
             "initialCapital": initial_capital
         },
@@ -970,7 +1385,7 @@ def run_backtest():
         "results": results,
         "parameters": {
             "strategy": strategy,
-            "symbols": [symbol],
+            "symbols": symbols,  # 使用完整的 symbols 数组
             "period": f"{start_date} to {end_date}",
             "initialCapital": initial_capital
         },

@@ -47,6 +47,8 @@ interface BacktestResult {
     profitLoss?: number;
     calmarRatio: number;
     avgReturnPerTrade?: number;
+    avgWin?: number;
+    avgLoss?: number;
     equityCurve?: Array<{ date: string; equity: number }>;
     volatility?: number;
     sortinoRatio?: number;
@@ -59,13 +61,25 @@ interface BacktestResult {
       signal: number;
       sma20?: number;
       sma50?: number;
+      volume?: number;
     }>;
   };
-  parameters: {
+  parameters?: {
     strategy: string;
     symbols: string[];
     period: string;
     initialCapital: number;
+    // 策略特定参数
+    shortMaPeriod?: number;
+    longMaPeriod?: number;
+    rsiPeriod?: number;
+    rsiOversold?: number;
+    rsiOverbought?: number;
+    macdFast?: number;
+    macdSlow?: number;
+    macdSignal?: number;
+    startDate?: string;
+    endDate?: string;
   };
   createdAt?: string;
 }
@@ -343,138 +357,481 @@ const BacktestDetail: React.FC = () => {
         </div>
       </div>
 
-      {/* Parameters Card */}
-      <Card title="Parameters" style={{ marginBottom: '24px' }}>
-        <Row gutter={[16, 16]}>
-          <Col span={6}>
-            <Statistic
-              title="Strategy"
-              value={parameters.strategy}
-              valueStyle={{ fontSize: '16px', fontWeight: 'bold' }}
-            />
-          </Col>
-          <Col span={6}>
-            <Statistic
-              title="Symbol"
-              value={parameters.symbols?.join(', ') || 'Unknown'}
-              valueStyle={{ fontSize: '16px', fontWeight: 'bold' }}
-            />
-          </Col>
-          <Col span={6}>
-            <Statistic
-              title="Period"
-              value={parameters.period}
-              valueStyle={{ fontSize: '16px', fontWeight: 'bold' }}
-            />
-          </Col>
-          <Col span={6}>
-            <Statistic
-              title="Initial Capital"
-              value={formatCurrency(parameters.initialCapital)}
-              valueStyle={{ fontSize: '16px', fontWeight: 'bold', color: '#1890ff' }}
-            />
-          </Col>
-        </Row>
-        
-        {backtestResult.status && (
-          <div style={{ marginTop: '16px' }}>
-            <Tag color={backtestResult.status === 'completed' ? 'success' : backtestResult.status === 'running' ? 'processing' : 'error'}>
-              {backtestResult.status.toUpperCase()}
-            </Tag>
-          </div>
-        )}
-      </Card>
+      {/* Top Summary Cards - Same as Backtest.tsx */}
+      {backtestResult?.results && (
+        <div style={{ marginBottom: '24px' }}>
+          <Row gutter={[16, 16]}>
+            <Col span={4}>
+              <Card size="small" style={{ textAlign: 'center' }}>
+                <Statistic
+                  title="Total Return"
+                  value={backtestResult.results.totalReturn || 0}
+                  precision={2}
+                  suffix="%"
+                  valueStyle={{
+                    color: (backtestResult.results.totalReturn || 0) >= 0 ? '#3f8600' : '#cf1322',
+                    fontWeight: 'bold'
+                  }}
+                />
+              </Card>
+            </Col>
+            <Col span={4}>
+              <Card size="small" style={{ textAlign: 'center' }}>
+                <Statistic
+                  title="Sharpe Ratio"
+                  value={backtestResult.results.sharpeRatio || 0}
+                  precision={2}
+                  valueStyle={{
+                    color:
+                      (backtestResult.results.sharpeRatio || 0) >= 1
+                        ? '#3f8600'
+                        : (backtestResult.results.sharpeRatio || 0) >= 0
+                        ? '#fa8c16'
+                        : '#cf1322',
+                    fontWeight: 'bold'
+                  }}
+                />
+              </Card>
+            </Col>
+            <Col span={4}>
+              <Card size="small" style={{ textAlign: 'center' }}>
+                <Statistic
+                  title="Max Drawdown"
+                  value={backtestResult.results.maxDrawdown || 0}
+                  precision={2}
+                  suffix="%"
+                  valueStyle={{
+                    color: '#cf1322',
+                    fontWeight: 'bold'
+                  }}
+                />
+              </Card>
+            </Col>
+            <Col span={4}>
+              <Card size="small" style={{ textAlign: 'center' }}>
+                <Statistic
+                  title="Win Rate"
+                  value={backtestResult.results.winRate || 0}
+                  precision={1}
+                  suffix="%"
+                  valueStyle={{
+                    color: (backtestResult.results.winRate || 0) >= 60 ? '#3f8600' : (backtestResult.results.winRate || 0) >= 40 ? '#fa8c16' : '#cf1322',
+                    fontWeight: 'bold'
+                  }}
+                />
+              </Card>
+            </Col>
+            <Col span={4}>
+              <Card size="small" style={{ textAlign: 'center' }}>
+                <Statistic
+                  title="Total Trades"
+                  value={backtestResult.results.trades || 0}
+                  valueStyle={{
+                    color: '#1890ff',
+                    fontWeight: 'bold'
+                  }}
+                />
+              </Card>
+            </Col>
+            <Col span={4}>
+              <Card size="small" style={{ textAlign: 'center' }}>
+                <Statistic
+                  title="Annualized Return"
+                  value={backtestResult.results.annualizedReturn || 0}
+                  precision={2}
+                  suffix="%"
+                  valueStyle={{
+                    color: (backtestResult.results.annualizedReturn || 0) >= 0 ? '#3f8600' : '#cf1322',
+                    fontWeight: 'bold'
+                  }}
+                />
+              </Card>
+            </Col>
+          </Row>
+        </div>
+      )}
 
-      {/* Results Tabs */}
-      <Card title="Results" style={{ marginBottom: '24px' }}>
-        <Tabs defaultActiveKey="results">
-          <TabPane tab="Results Table" key="results">
+      {/* Tabs for detailed results - Same structure as Backtest.tsx */}
+      <Card title="Backtest Results" style={{ marginTop: 16 }}>
+        <Tabs defaultActiveKey="overview">
+          {/* Overview Tab */}
+          <TabPane tab="Overview" key="overview">
             <Table
               columns={resultColumns}
               dataSource={resultData}
               pagination={false}
               size="small"
-              style={{ marginBottom: '24px' }}
+              rowKey="key"
             />
           </TabPane>
-          
-          <TabPane tab="Trading Chart" key="chart">
-            {backtestResult.results?.chartData ? (
-              <TradingChart
-                data={backtestResult.results.chartData}
-                height={500}
-                parameters={{
-                  strategy: backtestResult.parameters?.strategy,
-                  symbol: backtestResult.parameters?.symbols?.[0],
-                  period: backtestResult.parameters?.period,
-                  initialCapital: backtestResult.parameters?.initialCapital
-                }}
-              />
-            ) : (
-              <Empty 
-                description="No chart data available" 
-                image={Empty.PRESENTED_IMAGE_SIMPLE}
-                style={{ padding: '40px 0' }}
-              />
-            )}
+
+          {/* Charts Tab */}
+          <TabPane tab="Charts" key="charts">
+            {/* Equity Curve Chart */}
+            <Card title="Equity Curve" style={{ marginBottom: '24px' }}>
+              {equityCurveData.length > 0 ? (
+                <div>
+                  <div style={{ 
+                    display: 'flex', 
+                    alignItems: 'flex-end', 
+                    height: '200px',
+                    borderBottom: '1px solid #e8e8e8',
+                    marginBottom: '8px'
+                  }}>
+                    {equityCurveData.map((point, index) => {
+                      const prices = equityCurveData.map((p) => p.equity);
+                      const maxPrice = Math.max(...prices);
+                      const minPrice = Math.min(...prices);
+                      const range = maxPrice - minPrice;
+                      const price = point.equity;
+                      const heightPercent = range === 0 ? 50 : ((price - minPrice) / range) * 100;
+                      
+                      return (
+                        <div
+                          key={index}
+                          style={{
+                            width: '8%',
+                            height: `${Math.max(heightPercent, 5)}%`,
+                            backgroundColor: price >= equityCurveData[0].equity ? '#3f8600' : '#cf1322',
+                            borderRadius: '2px',
+                            position: 'relative'
+                          }}
+                          title={`${point.date}: $${safeToFixed(price, 2)}`}
+                        />
+                      );
+                    })}
+                  </div>
+                  
+                  <div style={{ 
+                    display: 'flex', 
+                    justifyContent: 'space-between',
+                    fontSize: '12px',
+                    color: '#666'
+                  }}>
+                    <span>{equityCurveData[0]?.date || 'Start'}</span>
+                    <span>Equity Curve</span>
+                    <span>{equityCurveData[equityCurveData.length - 1]?.date || 'End'}</span>
+                  </div>
+                </div>
+              ) : (
+                <Empty description="No equity curve data" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+              )}
+            </Card>
+
+            {/* Drawdown Chart */}
+            <Card title="Drawdown Chart" style={{ marginBottom: '24px' }}>
+              {equityCurveData.length > 0 ? (
+                <div>
+                  <div style={{ 
+                    display: 'flex', 
+                    alignItems: 'flex-start', 
+                    height: '150px',
+                    borderTop: '1px solid #e8e8e8',
+                    position: 'relative'
+                  }}>
+                    {equityCurveData.map((point, index) => {
+                      // Calculate drawdown
+                      const prices = equityCurveData.slice(0, index + 1).map(p => p.equity);
+                      const peak = Math.max(...prices);
+                      const drawdown = ((peak - point.equity) / peak) * 100;
+                      const maxDrawdown = Math.max(...equityCurveData.map((p, i) => {
+                        const pricesToI = equityCurveData.slice(0, i + 1).map(p2 => p2.equity);
+                        const peakToI = Math.max(...pricesToI);
+                        return ((peakToI - p.equity) / peakToI) * 100;
+                      }));
+                      
+                      const drawdownPercent = maxDrawdown === 0 ? 0 : (drawdown / maxDrawdown) * 100;
+                      
+                      return (
+                        <div
+                          key={index}
+                          style={{
+                            width: '8%',
+                            height: `${Math.max(drawdownPercent, 2)}%`,
+                            backgroundColor: '#cf1322',
+                            borderRadius: '0 0 2px 2px',
+                            position: 'relative'
+                          }}
+                          title={`${point.date}: ${safeToFixed(drawdown, 2)}% drawdown`}
+                        />
+                      );
+                    })}
+                  </div>
+                  
+                  <div style={{ 
+                    display: 'flex', 
+                    justifyContent: 'space-between',
+                    fontSize: '12px',
+                    color: '#666'
+                  }}>
+                    <span>{equityCurveData[0]?.date || 'Start'}</span>
+                    <span>Drawdown</span>
+                    <span>{equityCurveData[equityCurveData.length - 1]?.date || 'End'}</span>
+                  </div>
+                </div>
+              ) : (
+                <Empty description="No drawdown data" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+              )}
+            </Card>
+
+            {/* Trading Chart */}
+            <Card title="Trading Chart" style={{ marginBottom: '24px' }}>
+              {(() => {
+                // 调试日志：检查数据结构
+                console.log('=== Trading Chart Debug ===');
+                console.log('backtestResult:', backtestResult);
+                console.log('backtestResult?.parameters?.symbols:', backtestResult?.parameters?.symbols);
+                console.log('symbols length:', backtestResult?.parameters?.symbols?.length);
+                console.log('backtestResult?.results?.chartData:', backtestResult?.results?.chartData);
+                console.log('chartData length:', backtestResult?.results?.chartData?.length);
+                console.log('chartData first item:', backtestResult?.results?.chartData?.[0]);
+                
+                const symbols = backtestResult?.parameters?.symbols;
+                const chartData = backtestResult?.results?.chartData;
+                
+                if (symbols && symbols.length > 1) {
+                  // Portfolio 模式：不显示 Trading Chart
+                  return (
+                    <Empty 
+                      description={
+                        <div>
+                          <div style={{ marginBottom: '8px', fontWeight: '500' }}>Trading Chart is not available in portfolio mode</div>
+                          <div style={{ fontSize: '14px', color: '#666' }}>
+                            Portfolio backtest includes multiple stocks ({symbols.join(', ')}).
+                            <br />
+                            Individual price charts are not available for portfolio analysis.
+                          </div>
+                        </div>
+                      }
+                      image={Empty.PRESENTED_IMAGE_SIMPLE}
+                      style={{ padding: '40px 0' }}
+                    />
+                  );
+                } else if (chartData) {
+                  // 单股票模式：显示 Trading Chart
+                  console.log('Rendering TradingChart with data length:', chartData.length);
+                  return (
+                    <TradingChart
+                      data={chartData}
+                      height={400}
+                      parameters={{
+                        strategy: backtestResult?.parameters?.strategy,
+                        symbol: symbols?.[0],
+                        period: backtestResult?.parameters?.period,
+                        initialCapital: backtestResult?.parameters?.initialCapital
+                      }}
+                    />
+                  );
+                } else {
+                  // 单股票模式但没有 chartData
+                  console.log('No chartData available for single stock mode');
+                  return (
+                    <Empty 
+                      description="No chart data available" 
+                      image={Empty.PRESENTED_IMAGE_SIMPLE}
+                      style={{ padding: '40px 0' }}
+                    />
+                  );
+                }
+              })()}
+            </Card>
+          </TabPane>
+
+          {/* Trades Tab */}
+          <TabPane tab="Trades" key="trades">
+            <Card>
+              <h4 style={{ marginBottom: '16px' }}>Trade Log</h4>
+              {backtestResult?.results?.trades && backtestResult.results.trades > 0 ? (
+                <>
+                  {/* Trade Summary */}
+                  <div style={{ marginBottom: '24px', padding: '16px', background: '#fafafa', borderRadius: '8px' }}>
+                    <Row gutter={[16, 16]}>
+                      <Col span={6}>
+                        <div style={{ textAlign: 'center' }}>
+                          <div style={{ fontSize: '12px', color: '#666', marginBottom: '4px' }}>Total Trades</div>
+                          <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#1890ff' }}>
+                            {backtestResult.results.trades}
+                          </div>
+                        </div>
+                      </Col>
+                      <Col span={6}>
+                        <div style={{ textAlign: 'center' }}>
+                          <div style={{ fontSize: '12px', color: '#666', marginBottom: '4px' }}>Win Rate</div>
+                          <div style={{ 
+                            fontSize: '24px', 
+                            fontWeight: 'bold', 
+                            color: (backtestResult.results.winRate || 0) >= 60 ? '#3f8600' : (backtestResult.results.winRate || 0) >= 40 ? '#fa8c16' : '#cf1322'
+                          }}>
+                            {safeToFixed(backtestResult.results.winRate || 0, 1)}%
+                          </div>
+                        </div>
+                      </Col>
+                      <Col span={6}>
+                        <div style={{ textAlign: 'center' }}>
+                          <div style={{ fontSize: '12px', color: '#666', marginBottom: '4px' }}>Avg Win</div>
+                          <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#3f8600' }}>
+                            ${safeToFixed(backtestResult.results.avgWin || 0, 0)}
+                          </div>
+                        </div>
+                      </Col>
+                      <Col span={6}>
+                        <div style={{ textAlign: 'center' }}>
+                          <div style={{ fontSize: '12px', color: '#666', marginBottom: '4px' }}>Avg Loss</div>
+                          <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#cf1322' }}>
+                            ${safeToFixed(backtestResult.results.avgLoss || 0, 0)}
+                          </div>
+                        </div>
+                      </Col>
+                    </Row>
+                  </div>
+
+                  {/* Trade Table Placeholder */}
+                  <div style={{ 
+                    textAlign: 'center', 
+                    padding: '40px', 
+                    background: '#fafafa',
+                    borderRadius: '8px',
+                    border: '1px dashed #d9d9d9'
+                  }}>
+                    <Empty
+                      description={
+                        <div>
+                          <div style={{ marginBottom: '8px', fontWeight: '500' }}>Trade List Data</div>
+                          <div style={{ fontSize: '14px', color: '#666' }}>
+                            Detailed trade list is not available in historical backtest results.
+                            <br />
+                            Run a new backtest to see individual trade details.
+                          </div>
+                        </div>
+                      }
+                      image={Empty.PRESENTED_IMAGE_SIMPLE}
+                    />
+                  </div>
+                </>
+              ) : (
+                <Empty
+                  description="No trade data available"
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                  style={{ padding: '40px 0' }}
+                />
+              )}
+            </Card>
+          </TabPane>
+
+          {/* Parameters Tab */}
+          <TabPane tab="Parameters" key="parameters">
+            <Card>
+              <Row gutter={[16, 16]}>
+                <Col span={6}>
+                  <div>
+                    <div style={{ fontSize: '12px', color: '#666', marginBottom: '4px' }}>Strategy</div>
+                    <div style={{ fontSize: '16px', fontWeight: 'bold' }}>{parameters?.strategy || 'Unknown'}</div>
+                  </div>
+                </Col>
+                <Col span={6}>
+                  <div>
+                    <div style={{ fontSize: '12px', color: '#666', marginBottom: '4px' }}>Symbol</div>
+                    <div style={{ fontSize: '16px', fontWeight: 'bold' }}>{parameters?.symbols?.join(', ') || 'Unknown'}</div>
+                  </div>
+                </Col>
+                <Col span={6}>
+                  <div>
+                    <div style={{ fontSize: '12px', color: '#666', marginBottom: '4px' }}>Period</div>
+                    <div style={{ fontSize: '16px', fontWeight: 'bold' }}>{parameters?.period || 'N/A'}</div>
+                  </div>
+                </Col>
+                <Col span={6}>
+                  <div>
+                    <div style={{ fontSize: '12px', color: '#666', marginBottom: '4px' }}>Initial Capital</div>
+                    <div style={{ fontSize: '16px', fontWeight: 'bold' }}>${safeToFixed(parameters?.initialCapital || 0, 0)}</div>
+                  </div>
+                </Col>
+              </Row>
+              
+              {/* Status Tag */}
+              {backtestResult.status && (
+                <div style={{ marginTop: '16px' }}>
+                  <Tag color={backtestResult.status === 'completed' ? 'success' : backtestResult.status === 'running' ? 'processing' : 'error'}>
+                    {backtestResult.status.toUpperCase()}
+                  </Tag>
+                </div>
+              )}
+              
+              {/* Strategy Specific Parameters */}
+              {parameters?.strategy === 'moving_average' && (
+                <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid #f0f0f0' }}>
+                  <h4 style={{ marginBottom: '12px' }}>Moving Average Parameters</h4>
+                  <Row gutter={[16, 16]}>
+                    <Col span={6}>
+                      <div>
+                        <div style={{ fontSize: '12px', color: '#666', marginBottom: '4px' }}>Short MA Period</div>
+                        <div style={{ fontSize: '16px', fontWeight: 'bold' }}>{parameters.shortMaPeriod || 20}</div>
+                      </div>
+                    </Col>
+                    <Col span={6}>
+                      <div>
+                        <div style={{ fontSize: '12px', color: '#666', marginBottom: '4px' }}>Long MA Period</div>
+                        <div style={{ fontSize: '16px', fontWeight: 'bold' }}>{parameters.longMaPeriod || 50}</div>
+                      </div>
+                    </Col>
+                  </Row>
+                </div>
+              )}
+              
+              {parameters?.strategy === 'rsi' && (
+                <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid #f0f0f0' }}>
+                  <h4 style={{ marginBottom: '12px' }}>RSI Parameters</h4>
+                  <Row gutter={[16, 16]}>
+                    <Col span={6}>
+                      <div>
+                        <div style={{ fontSize: '12px', color: '#666', marginBottom: '4px' }}>RSI Period</div>
+                        <div style={{ fontSize: '16px', fontWeight: 'bold' }}>{parameters.rsiPeriod || 14}</div>
+                      </div>
+                    </Col>
+                    <Col span={6}>
+                      <div>
+                        <div style={{ fontSize: '12px', color: '#666', marginBottom: '4px' }}>Oversold Level</div>
+                        <div style={{ fontSize: '16px', fontWeight: 'bold' }}>{parameters.rsiOversold || 30}</div>
+                      </div>
+                    </Col>
+                    <Col span={6}>
+                      <div>
+                        <div style={{ fontSize: '12px', color: '#666', marginBottom: '4px' }}>Overbought Level</div>
+                        <div style={{ fontSize: '16px', fontWeight: 'bold' }}>{parameters.rsiOverbought || 70}</div>
+                      </div>
+                    </Col>
+                  </Row>
+                </div>
+              )}
+              
+              {parameters?.strategy === 'macd' && (
+                <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid #f0f0f0' }}>
+                  <h4 style={{ marginBottom: '12px' }}>MACD Parameters</h4>
+                  <Row gutter={[16, 16]}>
+                    <Col span={6}>
+                      <div>
+                        <div style={{ fontSize: '12px', color: '#666', marginBottom: '4px' }}>Fast Period</div>
+                        <div style={{ fontSize: '16px', fontWeight: 'bold' }}>{parameters.macdFast || 12}</div>
+                      </div>
+                    </Col>
+                    <Col span={6}>
+                      <div>
+                        <div style={{ fontSize: '12px', color: '#666', marginBottom: '4px' }}>Slow Period</div>
+                        <div style={{ fontSize: '16px', fontWeight: 'bold' }}>{parameters.macdSlow || 26}</div>
+                      </div>
+                    </Col>
+                    <Col span={6}>
+                      <div>
+                        <div style={{ fontSize: '12px', color: '#666', marginBottom: '4px' }}>Signal Period</div>
+                        <div style={{ fontSize: '16px', fontWeight: 'bold' }}>{parameters.macdSignal || 9}</div>
+                      </div>
+                    </Col>
+                  </Row>
+                </div>
+              )}
+            </Card>
           </TabPane>
         </Tabs>
-      </Card>
-
-      {/* Equity Curve */}
-      <Card title="Equity Curve" style={{ marginBottom: '24px' }}>
-        {equityCurveData.length > 0 ? (
-          <div style={{ 
-            height: '150px', 
-            background: '#fafafa',
-            borderRadius: '8px',
-            padding: '16px',
-            position: 'relative'
-          }}>
-            <div style={{ 
-              display: 'flex', 
-              alignItems: 'flex-end', 
-              height: '100px',
-              justifyContent: 'space-between',
-              marginBottom: '8px'
-            }}>
-              {equityCurveData.map((point, index) => {
-                const prices = equityCurveData.map(p => p.equity);
-                const maxPrice = Math.max(...prices);
-                const minPrice = Math.min(...prices);
-                const price = point.equity;
-                const heightPercent = ((price - minPrice) / (maxPrice - minPrice)) * 100;
-                
-                return (
-                  <div
-                    key={index}
-                    style={{
-                      width: '8%',
-                      height: `${Math.max(heightPercent, 5)}%`,
-                      backgroundColor: price >= equityCurveData[0].equity ? '#3f8600' : '#cf1322',
-                      borderRadius: '2px',
-                      position: 'relative'
-                    }}
-                    title={`${point.date}: $${safeToFixed(price, 2)}`}
-                  />
-                );
-              })}
-            </div>
-            
-            <div style={{ 
-              display: 'flex', 
-              justifyContent: 'space-between',
-              fontSize: '12px',
-              color: '#666'
-            }}>
-              <span>{equityCurveData[0]?.date || 'Start'}</span>
-              <span>Equity Curve</span>
-              <span>{equityCurveData[equityCurveData.length - 1]?.date || 'End'}</span>
-            </div>
-          </div>
-        ) : (
-          <Empty description="No equity curve data" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-        )}
       </Card>
 
       {/* Actions */}

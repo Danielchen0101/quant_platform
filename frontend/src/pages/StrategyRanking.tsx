@@ -10,10 +10,15 @@ const safeNumber = (value: any): number => {
   return isNaN(num) ? 0 : num;
 };
 
+const safeToFixed = (value: any, decimals: number = 2): string => {
+  const safeValue = safeNumber(value);
+  return safeValue.toFixed(decimals);
+};
+
 const formatPercent = (value: number): string => {
   const safeValue = safeNumber(value);
   const sign = safeValue >= 0 ? '+' : '';
-  return `${sign}${safeValue.toFixed(2)}%`;
+  return `${sign}${safeToFixed(safeValue, 2)}%`;
 };
 
 interface RankingItem {
@@ -195,10 +200,11 @@ const StrategyRanking: React.FC = () => {
       width: 100,
       sorter: (a: RankingItem, b: RankingItem) => a.sharpeRatio - b.sharpeRatio,
       render: (value: number) => {
-        const color = value >= 1 ? '#3f8600' : value >= 0 ? '#fa8c16' : '#cf1322';
+        const safeValue = safeNumber(value);
+        const color = safeValue >= 1 ? '#3f8600' : safeValue >= 0 ? '#fa8c16' : '#cf1322';
         return (
           <span style={{ color, fontWeight: 'bold' }}>
-            {value.toFixed(2)}
+            {safeToFixed(safeValue, 2)}
           </span>
         );
       },
@@ -217,10 +223,11 @@ const StrategyRanking: React.FC = () => {
       width: 100,
       sorter: (a: RankingItem, b: RankingItem) => a.sortinoRatio - b.sortinoRatio,
       render: (value: number) => {
-        const color = value >= 1 ? '#3f8600' : value >= 0 ? '#fa8c16' : '#cf1322';
+        const safeValue = safeNumber(value);
+        const color = safeValue >= 1 ? '#3f8600' : safeValue >= 0 ? '#fa8c16' : '#cf1322';
         return (
           <span style={{ color, fontWeight: 'bold' }}>
-            {value.toFixed(2)}
+            {safeToFixed(safeValue, 2)}
           </span>
         );
       },
@@ -239,16 +246,17 @@ const StrategyRanking: React.FC = () => {
       width: 100,
       sorter: (a: RankingItem, b: RankingItem) => a.maxDrawdown - b.maxDrawdown,
       render: (value: number) => {
+        const safeValue = safeNumber(value);
         // Max Drawdown 越小越好
         let color = '#cf1322'; // 默认红色
-        if (value > -20) {
+        if (safeValue > -20) {
           color = '#3f8600'; // 绿色
-        } else if (value >= -40) {
+        } else if (safeValue >= -40) {
           color = '#fa8c16'; // 橙色
         }
         return (
           <span style={{ color, fontWeight: 'bold' }}>
-            {value.toFixed(1)}%
+            {safeToFixed(safeValue, 1)}%
           </span>
         );
       },
@@ -267,10 +275,11 @@ const StrategyRanking: React.FC = () => {
       width: 100,
       sorter: (a: RankingItem, b: RankingItem) => a.volatility - b.volatility,
       render: (value: number) => {
-        const color = value < 20 ? '#3f8600' : value < 40 ? '#fa8c16' : '#cf1322';
+        const safeValue = safeNumber(value);
+        const color = safeValue < 20 ? '#3f8600' : safeValue < 40 ? '#fa8c16' : '#cf1322';
         return (
           <span style={{ color, fontWeight: 'bold' }}>
-            {value.toFixed(1)}%
+            {safeToFixed(safeValue, 1)}%
           </span>
         );
       },
@@ -289,10 +298,11 @@ const StrategyRanking: React.FC = () => {
       width: 100,
       sorter: (a: RankingItem, b: RankingItem) => a.winRate - b.winRate,
       render: (value: number) => {
-        const color = value >= 60 ? '#3f8600' : value >= 40 ? '#fa8c16' : '#cf1322';
+        const safeValue = safeNumber(value);
+        const color = safeValue >= 60 ? '#3f8600' : safeValue >= 40 ? '#fa8c16' : '#cf1322';
         return (
           <span style={{ color, fontWeight: 'bold' }}>
-            {value.toFixed(1)}%
+            {safeToFixed(safeValue, 1)}%
           </span>
         );
       },
@@ -311,10 +321,11 @@ const StrategyRanking: React.FC = () => {
       width: 110,
       sorter: (a: RankingItem, b: RankingItem) => a.profitFactor - b.profitFactor,
       render: (value: number) => {
-        const color = value >= 2 ? '#3f8600' : value >= 1 ? '#fa8c16' : '#cf1322';
+        const safeValue = safeNumber(value);
+        const color = safeValue >= 2 ? '#3f8600' : safeValue >= 1 ? '#fa8c16' : '#cf1322';
         return (
           <span style={{ color, fontWeight: 'bold' }}>
-            {value.toFixed(2)}
+            {safeToFixed(safeValue, 2)}
           </span>
         );
       },

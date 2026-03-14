@@ -36,6 +36,7 @@ export default {
     backtest: 'Backtest',
     strategyComparison: 'Strategy Comparison',
     strategyRanking: 'Strategy Ranking',
+    analytics: 'Analytics',
     watchlist: 'Watchlist',
     profile: 'Profile',
     parameterOptimization: 'Parameter Optimization',
@@ -43,8 +44,8 @@ export default {
 
   // Dashboard page
   dashboard: {
-    title: 'Automated Quant Platform - Dashboard',
-    subtitle: 'Professional quantitative trading analysis and strategy testing platform',
+    title: 'AlphaLab — Quant Research Dashboard',
+    subtitle: 'Research, backtest, and optimize quantitative strategies',
     totalBacktests: 'Total Backtests',
     activeStrategies: 'Active Strategies',
     totalProfit: 'Total Profit',
@@ -241,6 +242,12 @@ export default {
     symbol: 'Symbol',
     strategy: 'Strategy',
     topCombination: 'Top Combination',
+  },
+
+  // Analytics page
+  analytics: {
+    title: 'AlphaLab — Analytics',
+    subtitle: 'Strategy analytics and performance insights',
   },
 
   // Strategy types

@@ -1,54 +1,95 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Card, Table, Button, Input, Space, Alert, Empty, Tag, message } from 'antd';
-import { PlusOutlined, PlayCircleOutlined, DeleteOutlined } from '@ant-design/icons';
+import { Card, Table, Button, Input, Space, Alert, Empty, Tag, message, Statistic } from 'antd';
+import { PlusOutlined, PlayCircleOutlined, DeleteOutlined, EyeOutlined } from '@ant-design/icons';
 import { useLanguage } from '../contexts/LanguageContext';
 
 const STORAGE_KEY = "quant_watchlist";
 
+interface WatchlistItem {
+  symbol: string;
+  name: string;
+  price: number;
+  change: number;
+  changePercent: number;
+  volume: number;
+  marketCap: number;
+  sector: string;
+  addedAt: string;
+}
+
 const Watchlist: React.FC = () => {
   const { t } = useLanguage();
   const navigate = useNavigate();
-  const [symbols, setSymbols] = useState<string[]>([]);
+  const [watchlist, setWatchlist] = useState<WatchlistItem[]>([]);
   const [newSymbol, setNewSymbol] = useState('');
   const [loading, setLoading] = useState(false);
   const hasLoaded = React.useRef(false);
 
-  // Load watchlist from localStorage on component mount
+  // 安全的格式化函数
+  const safeToFixed = (value: any, decimals: number = 2): string => {
+    if (typeof value === 'number' && !isNaN(value)) {
+      return value.toFixed(decimals);
+    }
+    return '0.00';
+  };
+
+  // Load watchlist from localStorage on component mount and listen for changes
   useEffect(() => {
     // Prevent double loading in React Strict Mode
     if (hasLoaded.current) {
       return;
     }
     
-    const saved = localStorage.getItem(STORAGE_KEY);
-    
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) {
-          setSymbols(parsed);
-        } else {
-          setSymbols([]);
+    const loadWatchlist = () => {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed)) {
+            setWatchlist(parsed);
+          } else {
+            setWatchlist([]);
+          }
+        } catch (err) {
+          console.error('Failed to parse watchlist from localStorage:', err);
+          setWatchlist([]);
         }
-      } catch (err) {
-        console.error('Failed to parse watchlist from localStorage:', err);
-        setSymbols([]);
+      } else {
+        setWatchlist([]);
       }
-    }
+    };
+    
+    // Initial load
+    loadWatchlist();
+    
+    // Listen for storage events (changes from other tabs/windows)
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === STORAGE_KEY) {
+        loadWatchlist();
+      }
+    };
+    
+    window.addEventListener('storage', handleStorageChange);
     
     hasLoaded.current = true;
+    
+    // Cleanup
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+    };
   }, []);
 
   // Save watchlist to localStorage whenever it changes
   useEffect(() => {
     // Don't save on initial mount (empty array)
-    if (symbols.length === 0 && !hasLoaded.current) {
+    if (watchlist.length === 0 && !hasLoaded.current) {
       return;
     }
     
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(symbols));
-  }, [symbols]);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(watchlist));
+  }, [watchlist]);
 
   const handleAddSymbol = () => {
     const symbol = newSymbol.trim().toUpperCase();
@@ -65,25 +106,38 @@ const Watchlist: React.FC = () => {
     }
 
     // Check for duplicates using functional update to ensure consistency
-    setSymbols(prevSymbols => {
-      if (prevSymbols.includes(symbol)) {
+    setWatchlist(prevWatchlist => {
+      if (prevWatchlist.some(item => item.symbol === symbol)) {
         message.warning(`${symbol} is already in your watchlist`);
-        return prevSymbols;
+        return prevWatchlist;
       }
       
-      const updatedSymbols = [...prevSymbols, symbol];
+      // 创建基本的股票信息（可以从 Market 页面添加时会有完整信息）
+      const newItem: WatchlistItem = {
+        symbol: symbol,
+        name: `${symbol} Inc.`,
+        price: 100 + Math.random() * 100,
+        change: (Math.random() - 0.5) * 10,
+        changePercent: (Math.random() - 0.5) * 5,
+        volume: Math.floor(Math.random() * 10000000),
+        marketCap: Math.floor(Math.random() * 1000000000),
+        sector: 'Technology',
+        addedAt: new Date().toISOString()
+      };
+      
+      const updatedWatchlist = [...prevWatchlist, newItem];
       message.success(`${symbol} added to watchlist`);
-      return updatedSymbols;
+      return updatedWatchlist;
     });
     
     setNewSymbol('');
   };
 
   const handleRemoveSymbol = (symbolToRemove: string) => {
-    setSymbols(prevSymbols => {
-      const updatedSymbols = prevSymbols.filter(symbol => symbol !== symbolToRemove);
+    setWatchlist(prevWatchlist => {
+      const updatedWatchlist = prevWatchlist.filter(item => item.symbol !== symbolToRemove);
       message.success(`${symbolToRemove} removed from watchlist`);
-      return updatedSymbols;
+      return updatedWatchlist;
     });
   };
 
@@ -103,7 +157,7 @@ const Watchlist: React.FC = () => {
       title: 'Symbol',
       dataIndex: 'symbol',
       key: 'symbol',
-      width: 120,
+      width: 100,
       render: (symbol: string) => (
         <Tag color="blue" style={{ fontSize: '14px', fontWeight: 'bold' }}>
           {symbol}
@@ -111,10 +165,44 @@ const Watchlist: React.FC = () => {
       ),
     },
     {
+      title: 'Name',
+      dataIndex: 'name',
+      key: 'name',
+      width: 150,
+    },
+    {
+      title: 'Price',
+      dataIndex: 'price',
+      key: 'price',
+      width: 100,
+      render: (price: number) => `$${safeToFixed(price, 2)}`,
+    },
+    {
+      title: 'Change %',
+      dataIndex: 'changePercent',
+      key: 'changePercent',
+      width: 100,
+      render: (percent: number) => {
+        const safePercent = typeof percent === 'number' && !isNaN(percent) ? percent : 0;
+        const color = safePercent >= 0 ? '#3f8600' : '#cf1322';
+        return (
+          <span style={{ color, fontWeight: 'bold' }}>
+            {safePercent >= 0 ? '+' : ''}{safeToFixed(safePercent, 2)}%
+          </span>
+        );
+      },
+    },
+    {
+      title: 'Sector',
+      dataIndex: 'sector',
+      key: 'sector',
+      width: 120,
+    },
+    {
       title: 'Actions',
       key: 'actions',
       width: 200,
-      render: (_: any, record: { symbol: string }) => (
+      render: (_: any, record: WatchlistItem) => (
         <Space size="small">
           <Button
             type="primary"
@@ -122,7 +210,7 @@ const Watchlist: React.FC = () => {
             onClick={() => handleRunBacktest(record.symbol)}
             size="small"
           >
-            Run Backtest
+            Backtest
           </Button>
           <Button
             type="text"
@@ -138,9 +226,9 @@ const Watchlist: React.FC = () => {
     },
   ];
 
-  const dataSource = symbols.map(symbol => ({
-    key: symbol,
-    symbol,
+  const dataSource = watchlist.map(item => ({
+    key: item.symbol,
+    ...item
   }));
 
   return (
@@ -183,14 +271,15 @@ const Watchlist: React.FC = () => {
       </Card>
 
       {/* Watchlist Table */}
-      <Card title={`Watchlist (${symbols.length} symbols)`}>
-        {symbols.length > 0 ? (
+      <Card title={`Watchlist (${watchlist.length} stocks)`}>
+        {watchlist.length > 0 ? (
           <Table
             columns={columns}
             dataSource={dataSource}
             pagination={false}
             size="middle"
             bordered
+            scroll={{ x: 800 }}
           />
         ) : (
           <Empty
@@ -198,11 +287,20 @@ const Watchlist: React.FC = () => {
             image={Empty.PRESENTED_IMAGE_SIMPLE}
             style={{ padding: '40px 0' }}
           >
+            <div style={{ marginBottom: '16px' }}>
+              <p style={{ color: '#666', marginBottom: '8px' }}>
+                You can add stocks to your watchlist from:
+              </p>
+              <ul style={{ textAlign: 'left', margin: '0 auto', display: 'inline-block', color: '#666' }}>
+                <li>Market page - Click "Watchlist" button on any stock</li>
+                <li>This page - Use the form above to add symbols</li>
+              </ul>
+            </div>
             <Button
               type="primary"
               onClick={() => setNewSymbol('AAPL')}
             >
-              Add Example Symbols
+              Add Example Stock (AAPL)
             </Button>
           </Empty>
         )}

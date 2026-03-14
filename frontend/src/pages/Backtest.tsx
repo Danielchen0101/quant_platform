@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Card, Form, Input, InputNumber, Button, Select, DatePicker, Row, Col, Statistic, Table, Tag, Alert, Space, Divider, message, Empty, Spin, Progress, Tabs, Checkbox } from 'antd';
-import { PlayCircleOutlined, HistoryOutlined, LineChartOutlined, ArrowUpOutlined, ArrowDownOutlined, ReloadOutlined, EyeOutlined } from '@ant-design/icons';
+import { PlayCircleOutlined, HistoryOutlined, LineChartOutlined, ArrowUpOutlined, ArrowDownOutlined, ReloadOutlined, EyeOutlined, SaveOutlined, FolderOpenOutlined, DeleteOutlined } from '@ant-design/icons';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { backtraderAPI } from '../services/api';
 import dayjs from 'dayjs';
@@ -15,6 +15,19 @@ interface BacktestConfig {
   startDate: string;
   endDate: string;
   initialCapital: number;
+}
+
+// 交易项类型定义
+interface TradeItem {
+  entryDate: string;
+  exitDate?: string;
+  entryPrice: number;
+  exitPrice?: number;
+  pnl: number;
+  returnPct: number;
+  holdingDays?: number;
+  position?: number; // 1 = BUY, -1 = SELL
+  symbol?: string;
 }
 
 interface BacktestResult {
@@ -42,10 +55,13 @@ interface BacktestResult {
       signal: number;
       sma20?: number;
       sma50?: number;
+      volume?: number;
     }>;
     // 后端返回的额外交易统计字段
     avgWin?: number;
     avgLoss?: number;
+    // 交易列表（新增）
+    tradesList?: TradeItem[];
   };
   parameters: {
     strategy: string;
@@ -80,6 +96,15 @@ interface BacktestHistoryItem {
     trades: number;
     annualizedReturn?: number;
     profitLoss?: number;
+    // 图表数据（历史记录可能包含）
+    chartData?: Array<{
+      date: string;
+      close: number;
+      signal: number;
+      sma20?: number;
+      sma50?: number;
+      volume?: number;
+    }>;
   };
   parameters?: {
     strategy: string;
@@ -112,6 +137,9 @@ const Backtest: React.FC = () => {
   const [historyLoading, setHistoryLoading] = useState(true);
   const [selectedBacktests, setSelectedBacktests] = useState<string[]>([]);
   const [selectedStrategy, setSelectedStrategy] = useState<string>('moving_average');
+  const [savedStrategies, setSavedStrategies] = useState<any[]>([]);
+  const [showSavedStrategies, setShowSavedStrategies] = useState(false);
+  const [portfolioSymbols, setPortfolioSymbols] = useState<string[]>([]);
 
   // 设置默认日期范围（最近1年）使用 dayjs
   const defaultDateRange = () => {
@@ -224,23 +252,158 @@ const Backtest: React.FC = () => {
     }
   };
 
+  // 加载已保存的策略
+  useEffect(() => {
+    const loadSavedStrategies = () => {
+      try {
+        const saved = localStorage.getItem('quant_saved_strategies');
+        if (saved) {
+          setSavedStrategies(JSON.parse(saved));
+        }
+      } catch (err) {
+        console.error('Failed to load saved strategies:', err);
+      }
+    };
+    loadSavedStrategies();
+  }, []);
+
+  // 保存策略到 localStorage
+  const saveCurrentStrategy = () => {
+    try {
+      const formValues = form.getFieldsValue();
+      if (!formValues.strategy || !formValues.symbol) {
+        message.error('Please fill in strategy and symbol before saving');
+        return;
+      }
+
+      const strategyName = prompt('Enter a name for this strategy:');
+      if (!strategyName) return;
+
+      const newStrategy = {
+        id: Date.now().toString(),
+        name: strategyName,
+        strategyType: formValues.strategy,
+        createdTime: new Date().toISOString(),
+        config: {
+          strategy: formValues.strategy,
+          symbol: formValues.symbol,
+          dateRange: formValues.dateRange,
+          initialCapital: formValues.initialCapital,
+          // 根据策略类型保存对应的参数
+          ...(formValues.strategy === 'moving_average' && {
+            shortMaPeriod: formValues.shortMaPeriod,
+            longMaPeriod: formValues.longMaPeriod
+          }),
+          ...(formValues.strategy === 'rsi' && {
+            rsiPeriod: formValues.rsiPeriod,
+            rsiOversold: formValues.rsiOversold,
+            rsiOverbought: formValues.rsiOverbought
+          }),
+          ...(formValues.strategy === 'macd' && {
+            macdFast: formValues.macdFast,
+            macdSlow: formValues.macdSlow,
+            macdSignal: formValues.macdSignal
+          })
+        }
+      };
+
+      const updatedStrategies = [...savedStrategies, newStrategy];
+      setSavedStrategies(updatedStrategies);
+      localStorage.setItem('quant_saved_strategies', JSON.stringify(updatedStrategies));
+      message.success(`Strategy "${strategyName}" saved successfully!`);
+    } catch (err) {
+      console.error('Failed to save strategy:', err);
+      message.error('Failed to save strategy');
+    }
+  };
+
+  // 加载策略到表单
+  const loadStrategy = (strategy: any) => {
+    try {
+      const config = strategy.config;
+      form.setFieldsValue({
+        strategy: config.strategy,
+        symbol: config.symbol,
+        dateRange: config.dateRange,
+        initialCapital: config.initialCapital,
+        ...(config.strategy === 'moving_average' && {
+          shortMaPeriod: config.shortMaPeriod,
+          longMaPeriod: config.longMaPeriod
+        }),
+        ...(config.strategy === 'rsi' && {
+          rsiPeriod: config.rsiPeriod,
+          rsiOversold: config.rsiOversold,
+          rsiOverbought: config.rsiOverbought
+        }),
+        ...(config.strategy === 'macd' && {
+          macdFast: config.macdFast,
+          macdSlow: config.macdSlow,
+          macdSignal: config.macdSignal
+        })
+      });
+      message.success(`Strategy "${strategy.name}" loaded successfully!`);
+    } catch (err) {
+      console.error('Failed to load strategy:', err);
+      message.error('Failed to load strategy');
+    }
+  };
+
+  // 删除策略
+  const deleteStrategy = (id: string) => {
+    try {
+      const updatedStrategies = savedStrategies.filter(s => s.id !== id);
+      setSavedStrategies(updatedStrategies);
+      localStorage.setItem('quant_saved_strategies', JSON.stringify(updatedStrategies));
+      message.success('Strategy deleted successfully!');
+    } catch (err) {
+      console.error('Failed to delete strategy:', err);
+      message.error('Failed to delete strategy');
+    }
+  };
+
+  // 解析 symbol 并更新 portfolio 状态
+  const parseSymbols = (symbolInput: string) => {
+    const symbols = symbolInput
+      .split(',')
+      .map((s: string) => s.trim())
+      .filter(Boolean)
+      .map((s: string) => s.toUpperCase());
+    
+    setPortfolioSymbols(symbols);
+    return symbols;
+  };
+
   const handleRunBacktest = async (values: any) => {
     setLoading(true);
     setError('');
     setBacktestResult(null); // 清除旧结果，开始新的回测
     
     try {
-      const symbol = values.symbol.toUpperCase();
+      // 解析多个 symbol，支持逗号分隔
+      const symbols = parseSymbols(values.symbol);
+      
+      // 检查解析结果
+      console.log('Parsed symbols:', symbols);
+      
+      // 保持向后兼容：如果只有一个 symbol，使用原来的逻辑
+      const symbol = symbols.length === 1 ? symbols[0] : symbols.join(',');
       const strategy = values.strategy;
       
-      // 构建基础配置
+      // 构建基础配置 - 升级到 symbols 数组，同时保持 symbol 字段向后兼容
       const config: any = {
-        symbol: symbol,
         strategy: strategy,
         startDate: values.dateRange[0].format('YYYY-MM-DD'),
         endDate: values.dateRange[1].format('YYYY-MM-DD'),
         initialCapital: values.initialCapital,
+        symbols: symbols, // 新增：发送 symbols 数组
       };
+      
+      // 保持向后兼容：如果只有一个 symbol，同时设置 symbol 字段
+      if (symbols.length === 1) {
+        config.symbol = symbols[0]; // 单股票模式保持 symbol 字段
+      } else {
+        config.symbol = symbol; // 多股票模式：symbol 字段为逗号分隔的字符串
+      }
       
       // 根据策略类型添加对应的参数
       if (strategy === 'moving_average') {
@@ -394,10 +557,20 @@ const Backtest: React.FC = () => {
           const suffix = record.metric.includes('$') ? '' : '%';
           return <span style={{ color, fontWeight: 'bold' }}>{prefix}{safeToFixed(safeValue, 2)}{suffix}</span>;
         } else if (record.metric === 'Expectancy') {
-          // Expectancy 使用百分比格式
+          // Expectancy 显示逻辑：Portfolio 模式显示金额，单股票模式显示百分比
+          const isPortfolioMode = backtestResult?.parameters?.symbols && backtestResult.parameters.symbols.length > 1;
           const color = safeValue >= 0 ? '#3f8600' : '#cf1322';
-          const prefix = safeValue >= 0 ? '+' : '';
-          return <span style={{ color, fontWeight: 'bold' }}>{prefix}{safeToFixed(safeValue, 2)}%</span>;
+          
+          if (isPortfolioMode) {
+            // Portfolio 模式：显示为金额（美元）
+            const prefix = safeValue >= 0 ? '+$' : '-$';
+            const absValue = Math.abs(safeValue);
+            return <span style={{ color, fontWeight: 'bold' }}>{prefix}{safeToFixed(absValue, 2)}</span>;
+          } else {
+            // 单股票模式：显示为百分比
+            const prefix = safeValue >= 0 ? '+' : '';
+            return <span style={{ color, fontWeight: 'bold' }}>{prefix}{safeToFixed(safeValue, 2)}%</span>;
+          }
         } else if (record.metric === 'Volatility') {
           // Volatility 使用百分比格式
           const color = safeValue < 20 ? '#3f8600' : safeValue < 40 ? '#faad14' : '#cf1322';
@@ -731,13 +904,58 @@ const Backtest: React.FC = () => {
                       placeholder="Enter stock symbol" 
                       size="large"
                       prefix={<LineChartOutlined />}
+                      onChange={(e) => {
+                        parseSymbols(e.target.value);
+                      }}
                       onBlur={(e) => {
                         if (e.target.value) {
-                          form.setFieldsValue({ symbol: e.target.value.toUpperCase() });
+                          const value = e.target.value.toUpperCase();
+                          form.setFieldsValue({ symbol: value });
+                          parseSymbols(value);
                         }
                       }}
                     />
                   </Form.Item>
+                  
+                  {/* Portfolio Mode Indicator */}
+                  {portfolioSymbols.length > 1 && (
+                    <div style={{
+                      marginTop: '8px',
+                      padding: '12px',
+                      background: 'linear-gradient(135deg, #f0f9ff 0%, #e6f7ff 100%)',
+                      border: '1px solid #91d5ff',
+                      borderRadius: '6px',
+                      fontSize: '13px'
+                    }}>
+                      <div style={{ 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        marginBottom: '6px',
+                        fontWeight: '600',
+                        color: '#1890ff'
+                      }}>
+                        <span style={{ 
+                          background: '#1890ff', 
+                          color: 'white',
+                          padding: '2px 8px',
+                          borderRadius: '4px',
+                          fontSize: '11px',
+                          marginRight: '8px'
+                        }}>
+                          PORTFOLIO MODE
+                        </span>
+                        <span>Multi-Stock Backtest</span>
+                      </div>
+                      <div style={{ color: '#666' }}>
+                        <div style={{ marginBottom: '4px' }}>
+                          <strong>Symbols:</strong> {portfolioSymbols.join(', ')}
+                        </div>
+                        <div style={{ fontSize: '12px', color: '#8c8c8c' }}>
+                          Testing {portfolioSymbols.length} stocks as a portfolio
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </Col>
                 <Col span={12}>
                   <Form.Item
@@ -995,8 +1213,129 @@ const Backtest: React.FC = () => {
                   {loading ? 'Running Backtest...' : 'Run Backtest'}
                 </Button>
               </Form.Item>
+              
+              <Form.Item>
+                <Row gutter={8}>
+                  <Col span={12}>
+                    <Button
+                      type="default"
+                      size="large"
+                      icon={<SaveOutlined />}
+                      style={{ width: '100%' }}
+                      onClick={saveCurrentStrategy}
+                      disabled={loading}
+                    >
+                      Save Strategy
+                    </Button>
+                  </Col>
+                  <Col span={12}>
+                    <Button
+                      type="default"
+                      size="large"
+                      icon={<FolderOpenOutlined />}
+                      style={{ width: '100%' }}
+                      onClick={() => setShowSavedStrategies(!showSavedStrategies)}
+                      disabled={loading}
+                    >
+                      {showSavedStrategies ? 'Hide Saved' : 'View Saved'}
+                    </Button>
+                  </Col>
+                </Row>
+              </Form.Item>
             </Form>
           </Card>
+          
+          {/* Saved Strategies Panel */}
+          {showSavedStrategies && (
+            <Card 
+              title="Saved Strategies" 
+              style={{ marginTop: 16 }}
+              extra={
+                <Button
+                  type="link"
+                  size="small"
+                  onClick={() => setShowSavedStrategies(false)}
+                >
+                  Close
+                </Button>
+              }
+            >
+              {savedStrategies.length === 0 ? (
+                <Empty
+                  description="No saved strategies yet"
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                />
+              ) : (
+                <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
+                  {savedStrategies.map((strategy) => (
+                    <Card
+                      key={strategy.id}
+                      size="small"
+                      style={{ marginBottom: 8, border: '1px solid #f0f0f0' }}
+                      title={
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ fontWeight: '600' }}>{strategy.name}</span>
+                          <Tag color={
+                            strategy.config.strategy === 'moving_average' ? 'blue' :
+                            strategy.config.strategy === 'rsi' ? 'green' :
+                            strategy.config.strategy === 'macd' ? 'purple' : 'default'
+                          }>
+                            {strategy.config.strategy}
+                          </Tag>
+                        </div>
+                      }
+                      extra={
+                        <Space>
+                          <Button
+                            type="link"
+                            size="small"
+                            icon={<FolderOpenOutlined />}
+                            onClick={() => loadStrategy(strategy)}
+                          >
+                            Load
+                          </Button>
+                          <Button
+                            type="link"
+                            size="small"
+                            danger
+                            icon={<DeleteOutlined />}
+                            onClick={() => deleteStrategy(strategy.id)}
+                          >
+                            Delete
+                          </Button>
+                        </Space>
+                      }
+                    >
+                      <div style={{ fontSize: '12px', color: '#666' }}>
+                        <div><strong>Symbol:</strong> {strategy.config.symbol}</div>
+                        <div><strong>Initial Capital:</strong> ${strategy.config.initialCapital?.toLocaleString() || '100,000'}</div>
+                        <div><strong>Saved:</strong> {new Date(strategy.createdTime).toLocaleDateString()}</div>
+                        {strategy.config.strategy === 'moving_average' && (
+                          <div>
+                            <strong>Parameters:</strong> Short MA: {strategy.config.shortMaPeriod || 20}, Long MA: {strategy.config.longMaPeriod || 50}
+                          </div>
+                        )}
+                        {strategy.config.strategy === 'rsi' && (
+                          <div>
+                            <strong>Parameters:</strong> RSI Period: {strategy.config.rsiPeriod || 14}, 
+                            Oversold: {strategy.config.rsiOversold || 30}, 
+                            Overbought: {strategy.config.rsiOverbought || 70}
+                          </div>
+                        )}
+                        {strategy.config.strategy === 'macd' && (
+                          <div>
+                            <strong>Parameters:</strong> Fast: {strategy.config.macdFast || 12}, 
+                            Slow: {strategy.config.macdSlow || 26}, 
+                            Signal: {strategy.config.macdSignal || 9}
+                          </div>
+                        )}
+                      </div>
+                    </Card>
+                  ))}
+                </div>
+              )}
+            </Card>
+          )}
           
           {backtestResult && (
             <div ref={resultsRef}>
@@ -1382,12 +1721,30 @@ const Backtest: React.FC = () => {
                           <Divider />
 
                           <h4>Trading Chart</h4>
-                          {backtestResult?.results?.chartData ? (
+                          {backtestResult?.parameters?.symbols && backtestResult.parameters.symbols.length > 1 ? (
+                            // Portfolio 模式：不显示 Trading Chart
+                            <Empty 
+                              description={
+                                <div>
+                                  <div style={{ marginBottom: '8px', fontWeight: '500' }}>Trading Chart is not available in portfolio mode</div>
+                                  <div style={{ fontSize: '14px', color: '#666' }}>
+                                    Portfolio backtest includes multiple stocks ({backtestResult.parameters.symbols.join(', ')}).
+                                    <br />
+                                    Individual price charts are not available for portfolio analysis.
+                                  </div>
+                                </div>
+                              }
+                              image={Empty.PRESENTED_IMAGE_SIMPLE}
+                              style={{ padding: '40px 0' }}
+                            />
+                          ) : backtestResult?.results?.chartData ? (
+                            // 单股票模式：显示 Trading Chart
                             <TradingChart
                               data={backtestResult.results.chartData}
                               height={400}
                             />
                           ) : (
+                            // 单股票模式但没有 chartData
                             <Empty 
                               description="No chart data available" 
                               image={Empty.PRESENTED_IMAGE_SIMPLE}
@@ -1405,180 +1762,256 @@ const Backtest: React.FC = () => {
                           <h4 style={{ marginBottom: '16px' }}>Trade Log</h4>
                           {backtestResult?.results?.trades && backtestResult.results.trades > 0 ? (
                             <>
-                              {/* Trade Summary and Mock Data Generation */}
+                              {/* Trade Summary - 优先使用真实数据 */}
                               {(() => {
                                 // 优先逻辑：如果后端有真实 trade list，用真实数据
-                                // 目前后端没有返回 trade list，使用前端 mock data 作为临时兜底
+                                const realTradesList = backtestResult.results.tradesList;
+                                const tradeCount = backtestResult.results.trades || 0;
                                 
-                                // 获取当前 symbol（优先使用 backtestResult 的 symbol，否则用表单的 symbol）
-                                const currentSymbol = backtestResult?.parameters?.symbols?.[0] || form.getFieldValue('symbol') || 'AAPL';
-                                const tradeCount = backtestResult.results.trades || 10;
+                                let tradeData;
                                 
-                                // 生成模拟交易数据并计算统计（只生成一次）
-                                const startDate = new Date();
-                                startDate.setDate(startDate.getDate() - tradeCount);
-                                
-                                const trades = [];
-                                let winningTrades = 0;
-                                let losingTrades = 0;
-                                let totalPnl = 0;
-                                
-                                // 基于真实后端数据的统计信息来生成合理的模拟数据
-                                const winRate = backtestResult.results.winRate || 50;
-                                const avgWin = backtestResult.results.avgWin || 500;
-                                const avgLoss = backtestResult.results.avgLoss || -300;
-                                
-                                for (let i = 0; i < tradeCount; i++) {
-                                  const date = new Date(startDate);
-                                  date.setDate(date.getDate() + i);
+                                if (realTradesList && realTradesList.length > 0) {
+                                  // 使用真实 trade list 数据
+                                  console.log('Using real trades list:', realTradesList.length, 'trades');
                                   
-                                  // 基于真实胜率生成交易结果
-                                  const isWin = Math.random() * 100 < winRate;
-                                  const action = i % 2 === 0 ? 'BUY' : 'SELL';
-                                  const price = 100 + Math.random() * 100;
-                                  const quantity = Math.floor(Math.random() * 100) + 10;
+                                  // 计算统计信息
+                                  let winningTrades = 0;
+                                  let losingTrades = 0;
+                                  let totalPnl = 0;
                                   
-                                  // 基于真实平均盈亏生成 PnL
-                                  const pnl = isWin 
-                                    ? avgWin * (0.8 + Math.random() * 0.4) // 80%-120% 的 avgWin
-                                    : avgLoss * (0.8 + Math.random() * 0.4); // 80%-120% 的 avgLoss
+                                  for (const trade of realTradesList) {
+                                    const pnl = trade.pnl || 0;
+                                    if (pnl > 0) winningTrades++;
+                                    else if (pnl < 0) losingTrades++;
+                                    totalPnl += pnl;
+                                  }
                                   
-                                  const returnVal = (pnl / (price * quantity)) * 100;
+                                  const averagePnl = totalPnl / realTradesList.length;
                                   
-                                  if (pnl > 0) winningTrades++;
-                                  else if (pnl < 0) losingTrades++;
-                                  totalPnl += pnl;
+                                  // 转换数据结构以匹配表格
+                                  const sortedTrades = realTradesList.map((trade: TradeItem, index: number) => ({
+                                    key: index,
+                                    date: trade.entryDate || '',
+                                    symbol: trade.symbol || backtestResult?.parameters?.symbols?.[0] || 'Unknown',
+                                    action: trade.position === 1 ? 'BUY' : 'SELL',
+                                    price: trade.entryPrice || 0,
+                                    quantity: Math.floor(10000 / (trade.entryPrice || 100)), // 估算数量
+                                    pnl: trade.pnl || 0,
+                                    return: trade.returnPct || 0
+                                  }));
                                   
-                                  trades.push({
-                                    key: i,
-                                    date: date.toISOString().split('T')[0],
-                                    symbol: currentSymbol,
-                                    action,
-                                    price,
-                                    quantity,
-                                    pnl,
-                                    return: returnVal,
-                                  });
+                                  // 按日期排序（最新的在前）
+                                  sortedTrades.sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
+                                  
+                                  tradeData = {
+                                    trades: sortedTrades,
+                                    winningTrades,
+                                    losingTrades,
+                                    averagePnl,
+                                    isRealData: true,
+                                    tradeCount: realTradesList.length,
+                                    winRate: backtestResult.results.winRate || 0,
+                                    avgWin: 0,
+                                    avgLoss: 0
+                                  };
+                                } else {
+                                  // 没有真实 trade list，使用前端 mock data 作为临时兜底
+                                  console.log('No real trades list, using mock data');
+                                  
+                                  // 获取当前 symbol（优先使用 backtestResult 的 symbol，否则用表单的 symbol）
+                                  const currentSymbols = backtestResult?.parameters?.symbols || [form.getFieldValue('symbol') || 'AAPL'];
+                                  const currentSymbol = currentSymbols[0];
+                                  const mockTradeCount = backtestResult.results.trades || 10;
+                                  
+                                  // 生成模拟交易数据并计算统计（只生成一次）
+                                  const startDate = new Date();
+                                  startDate.setDate(startDate.getDate() - mockTradeCount);
+                                  
+                                  const trades = [];
+                                  let winningTrades = 0;
+                                  let losingTrades = 0;
+                                  let totalPnl = 0;
+                                  
+                                  // 基于真实后端数据的统计信息来生成合理的模拟数据
+                                  const winRate = backtestResult.results.winRate || 50;
+                                  const avgWin = backtestResult.results.avgWin || 500;
+                                  const avgLoss = backtestResult.results.avgLoss || -300;
+                                  
+                                  for (let i = 0; i < mockTradeCount; i++) {
+                                    const date = new Date(startDate);
+                                    date.setDate(date.getDate() + i);
+                                    
+                                    // 基于真实胜率生成交易结果
+                                    const isWin = Math.random() * 100 < winRate;
+                                    const action = i % 2 === 0 ? 'BUY' : 'SELL';
+                                    const price = 100 + Math.random() * 100;
+                                    const quantity = Math.floor(Math.random() * 100) + 10;
+                                    
+                                    // 基于真实平均盈亏生成 PnL
+                                    const pnl = isWin 
+                                      ? avgWin * (0.8 + Math.random() * 0.4) // 80%-120% 的 avgWin
+                                      : avgLoss * (0.8 + Math.random() * 0.4); // 80%-120% 的 avgLoss
+                                    
+                                    const returnVal = (pnl / (price * quantity)) * 100;
+                                    
+                                    if (pnl > 0) winningTrades++;
+                                    else if (pnl < 0) losingTrades++;
+                                    totalPnl += pnl;
+                                    
+                                    trades.push({
+                                      key: i,
+                                      date: date.toISOString().split('T')[0],
+                                      symbol: currentSymbol,
+                                      action,
+                                      price,
+                                      quantity,
+                                      pnl,
+                                      return: returnVal,
+                                    });
+                                  }
+                                  
+                                  const averagePnl = totalPnl / mockTradeCount;
+                                  
+                                  // 按日期倒序排序
+                                  const sortedTrades = trades.sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
+                                  
+                                  tradeData = {
+                                    trades: sortedTrades,
+                                    winningTrades,
+                                    losingTrades,
+                                    averagePnl,
+                                    isRealData: false,
+                                    tradeCount: mockTradeCount,
+                                    winRate,
+                                    avgWin,
+                                    avgLoss
+                                  };
                                 }
                                 
-                                const averagePnl = totalPnl / tradeCount;
-                                
-                                // 按日期倒序排序
-                                const sortedTrades = trades.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-                                
+                                // 渲染 Trade Summary
                                 return (
                                   <>
-                                    {/* Trade Summary - 基于模拟数据计算 */}
                                     <div style={{ marginBottom: '16px', padding: '12px', background: '#fafafa', borderRadius: '8px' }}>
                                       <Row gutter={[16, 8]}>
                                         <Col span={6}>
                                           <div style={{ textAlign: 'center' }}>
                                             <div style={{ fontSize: '12px', color: '#666', marginBottom: '4px' }}>Total Trades</div>
-                                            <div style={{ fontSize: '18px', fontWeight: 'bold' }}>{tradeCount}</div>
+                                            <div style={{ fontSize: '18px', fontWeight: 'bold' }}>{tradeData.tradeCount || tradeData.trades.length}</div>
                                           </div>
                                         </Col>
-                                        <Col span={6}>
-                                          <div style={{ textAlign: 'center' }}>
-                                            <div style={{ fontSize: '12px', color: '#666', marginBottom: '4px' }}>Winning Trades</div>
-                                            <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#3f8600' }}>{winningTrades}</div>
+                                      <Col span={6}>
+                                        <div style={{ textAlign: 'center' }}>
+                                          <div style={{ fontSize: '12px', color: '#666', marginBottom: '4px' }}>Winning Trades</div>
+                                          <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#3f8600' }}>{tradeData.winningTrades}</div>
+                                        </div>
+                                      </Col>
+                                      <Col span={6}>
+                                        <div style={{ textAlign: 'center' }}>
+                                          <div style={{ fontSize: '12px', color: '#666', marginBottom: '4px' }}>Losing Trades</div>
+                                          <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#cf1322' }}>{tradeData.losingTrades}</div>
+                                        </div>
+                                      </Col>
+                                      <Col span={6}>
+                                        <div style={{ textAlign: 'center' }}>
+                                          <div style={{ fontSize: '12px', color: '#666', marginBottom: '4px' }}>Average PnL</div>
+                                          <div style={{ fontSize: '18px', fontWeight: 'bold', color: tradeData.averagePnl >= 0 ? '#3f8600' : '#cf1322' }}>
+                                            {tradeData.averagePnl >= 0 ? '+' : ''}${safeToFixed(tradeData.averagePnl, 2)}
                                           </div>
-                                        </Col>
-                                        <Col span={6}>
-                                          <div style={{ textAlign: 'center' }}>
-                                            <div style={{ fontSize: '12px', color: '#666', marginBottom: '4px' }}>Losing Trades</div>
-                                            <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#cf1322' }}>{losingTrades}</div>
-                                          </div>
-                                        </Col>
-                                        <Col span={6}>
-                                          <div style={{ textAlign: 'center' }}>
-                                            <div style={{ fontSize: '12px', color: '#666', marginBottom: '4px' }}>Average PnL</div>
-                                            <div style={{ fontSize: '18px', fontWeight: 'bold', color: averagePnl >= 0 ? '#3f8600' : '#cf1322' }}>
-                                              {averagePnl >= 0 ? '+' : ''}${safeToFixed(averagePnl, 2)}
-                                            </div>
-                                          </div>
-                                        </Col>
-                                      </Row>
-                                    </div>
+                                        </div>
+                                      </Col>
+                                    </Row>
+                                  </div>
+                                  
+                                  {/* Trade Table */}
+                                  <Table
+                                    columns={[
+                                      {
+                                        title: 'Date',
+                                        dataIndex: 'date',
+                                        key: 'date',
+                                        width: 100,
+                                        sorter: (a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime(),
+                                        defaultSortOrder: 'descend',
+                                      },
+                                      {
+                                        title: 'Symbol',
+                                        dataIndex: 'symbol',
+                                        key: 'symbol',
+                                        width: 80,
+                                      },
+                                      {
+                                        title: 'Action',
+                                        dataIndex: 'action',
+                                        key: 'action',
+                                        width: 80,
+                                        render: (action: string) => (
+                                          <Tag color={action === 'BUY' ? 'green' : 'red'}>
+                                            {action}
+                                          </Tag>
+                                        ),
+                                      },
+                                      {
+                                        title: 'Price',
+                                        dataIndex: 'price',
+                                        key: 'price',
+                                        width: 80,
+                                        render: (price: number) => `$${safeToFixed(price, 2)}`,
+                                        align: 'right' as const,
+                                      },
+                                      {
+                                        title: 'Quantity',
+                                        dataIndex: 'quantity',
+                                        key: 'quantity',
+                                        width: 80,
+                                      },
+                                      {
+                                        title: 'P&L',
+                                        dataIndex: 'pnl',
+                                        key: 'pnl',
+                                        width: 100,
+                                        render: (pnl: number) => (
+                                          <span style={{ color: pnl >= 0 ? '#3f8600' : '#cf1322', fontWeight: 'bold' }}>
+                                            {pnl >= 0 ? '+' : ''}${safeToFixed(pnl, 2)}
+                                          </span>
+                                        ),
+                                        sorter: (a: any, b: any) => a.pnl - b.pnl,
+                                        align: 'right' as const,
+                                      },
+                                      {
+                                        title: 'Return',
+                                        dataIndex: 'return',
+                                        key: 'return',
+                                        width: 80,
+                                        render: (returnVal: number) => (
+                                          <span style={{ color: returnVal >= 0 ? '#3f8600' : '#cf1322', fontWeight: 'bold' }}>
+                                            {returnVal >= 0 ? '+' : ''}{safeToFixed(returnVal, 2)}%
+                                          </span>
+                                        ),
+                                        sorter: (a: any, b: any) => a.return - b.return,
+                                        align: 'right' as const,
+                                      },
+                                    ]}
+                                    dataSource={tradeData.trades}
+                                    pagination={{ pageSize: 10 }}
+                                    size="small"
+                                    scroll={{ x: 600 }}
+                                  />
                                     
-                                    {/* Trade Table - 使用模拟数据 */}
-                                    <Table
-                                      columns={[
-                                        {
-                                          title: 'Date',
-                                          dataIndex: 'date',
-                                          key: 'date',
-                                          width: 100,
-                                          sorter: (a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime(),
-                                          defaultSortOrder: 'descend',
-                                        },
-                                        {
-                                          title: 'Symbol',
-                                          dataIndex: 'symbol',
-                                          key: 'symbol',
-                                          width: 80,
-                                        },
-                                        {
-                                          title: 'Action',
-                                          dataIndex: 'action',
-                                          key: 'action',
-                                          width: 80,
-                                          render: (action: string) => (
-                                            <Tag color={action === 'BUY' ? 'green' : 'red'}>
-                                              {action}
-                                            </Tag>
-                                          ),
-                                        },
-                                        {
-                                          title: 'Price',
-                                          dataIndex: 'price',
-                                          key: 'price',
-                                          width: 80,
-                                          render: (price: number) => `$${safeToFixed(price, 2)}`,
-                                          align: 'right' as const,
-                                        },
-                                        {
-                                          title: 'Quantity',
-                                          dataIndex: 'quantity',
-                                          key: 'quantity',
-                                          width: 80,
-                                        },
-                                        {
-                                          title: 'P&L',
-                                          dataIndex: 'pnl',
-                                          key: 'pnl',
-                                          width: 100,
-                                          render: (pnl: number) => (
-                                            <span style={{ color: pnl >= 0 ? '#3f8600' : '#cf1322', fontWeight: 'bold' }}>
-                                              {pnl >= 0 ? '+' : ''}${safeToFixed(pnl, 2)}
-                                            </span>
-                                          ),
-                                          sorter: (a: any, b: any) => a.pnl - b.pnl,
-                                          align: 'right' as const,
-                                        },
-                                        {
-                                          title: 'Return',
-                                          dataIndex: 'return',
-                                          key: 'return',
-                                          width: 80,
-                                          render: (returnVal: number) => (
-                                            <span style={{ color: returnVal >= 0 ? '#3f8600' : '#cf1322', fontWeight: 'bold' }}>
-                                              {returnVal >= 0 ? '+' : ''}{safeToFixed(returnVal, 2)}%
-                                            </span>
-                                          ),
-                                          sorter: (a: any, b: any) => a.return - b.return,
-                                          align: 'right' as const,
-                                        },
-                                      ]}
-                                      dataSource={sortedTrades}
-                                      pagination={{ pageSize: 10 }}
-                                      size="small"
-                                      scroll={{ x: 600 }}
-                                    />
-                                    
-                                    {/* 后端真实数据提示 */}
-                                    <div style={{ marginTop: '16px', padding: '8px', background: '#f0f9ff', borderRadius: '4px', fontSize: '12px', color: '#666' }}>
+                                    {/* 数据来源提示 */}
+                                    <div style={{ marginTop: '16px', padding: '8px', background: tradeData.isRealData ? '#f0fff4' : '#f0f9ff', borderRadius: '4px', fontSize: '12px', color: '#666' }}>
                                       <strong>数据说明：</strong> 
-                                      Trade list 目前使用前端模拟数据展示。后端返回了交易统计数据：总交易数 {tradeCount}，胜率 {safeToFixed(winRate, 1)}%，平均盈利 ${safeToFixed(avgWin, 2)}，平均亏损 ${safeToFixed(avgLoss, 2)}。
+                                      {tradeData.isRealData ? (
+                                        <>
+                                          ✅ 使用后端真实交易数据。共 {tradeData.trades.length} 笔交易，胜率 {safeToFixed(backtestResult.results.winRate || 0, 1)}%，平均每笔交易回报 {safeToFixed(backtestResult.results.avgReturnPerTrade || 0, 2)}%。
+                                          {backtestResult.parameters?.symbols && backtestResult.parameters.symbols.length > 1 && (
+                                            <><br />📊 <strong>Portfolio Mode:</strong> 显示 {backtestResult.parameters.symbols.length} 个股票的所有交易记录。</>
+                                          )}
+                                        </>
+                                      ) : (
+                                        <>
+                                          ℹ️ 使用前端模拟数据展示。后端返回了交易统计数据：总交易数 {tradeData.tradeCount}，胜率 {safeToFixed(tradeData.winRate, 1)}%，平均盈利 ${safeToFixed(tradeData.avgWin, 2)}，平均亏损 ${safeToFixed(tradeData.avgLoss, 2)}。
+                                        </>
+                                      )}
                                     </div>
                                   </>
                                 );

@@ -1,0 +1,57 @@
+/* NavigationMenu.module.css - Sidebar 菜单项对齐修复 */
+
+/* 覆盖 Ant Design Menu 的默认样式 */
+.navigationMenu :global(.ant-menu-dark.ant-menu-inline .ant-menu-item) {
+  height: 44px !important;
+  line-height: 44px !important;
+  margin: 0 !important;
+  padding: 0 16px !important;
+  display: flex !important;
+  align-items: center !important;
+  border: none !important;
+  border-radius: 0 !important;
+  transition: none !important;
+}
+
+/* 确保激活态和未激活态使用相同的 padding */
+.navigationMenu :global(.ant-menu-dark.ant-menu-inline .ant-menu-item-selected) {
+  padding: 0 16px !important;
+}
+
+/* 覆盖 Ant Design 的图标容器 */
+.navigationMenu :global(.ant-menu-item .ant-menu-item-icon) {
+  margin-right: 12px !important;
+  width: 20px !important;
+  display: flex !important;
+  justify-content: center !important;
+  align-items: center !important;
+  font-size: 16px !important;
+  line-height: 1 !important;
+  flex-shrink: 0 !important;
+}
+
+/* 覆盖文字容器 */
+.navigationMenu :global(.ant-menu-title-content) {
+  flex: 1 !important;
+  font-size: 14px !important;
+  font-weight: 400 !important;
+  line-height: 44px !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+/* 确保 Link 组件不影响布局 */
+.navigationMenu :global(.ant-menu-item a) {
+  display: flex !important;
+  align-items: center !important;
+  width: 100% !important;
+  height: 100% !important;
+  color: inherit !important;
+  text-decoration: none !important;
+}
+
+/* 菜单容器样式 */
+.navigationMenu :global(.ant-menu-dark.ant-menu-inline) {
+  border-right: none !important;
+}
