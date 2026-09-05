@@ -4,6 +4,7 @@ import pytest
 
 from kalshi_engine import (
     MAX_ECONOMIC_SIZE_SEARCH_STEPS,
+    _completed_minute_history,
     _smaller_economic_order_size,
     _worst_fill_price,
     evaluate_btc15_contract,
@@ -140,6 +141,237 @@ def test_confirmed_favorite_can_pass_all_paper_gates():
     assert result["edge"]["netEdge"] >= result["edge"]["minimumNetEdge"]
     assert result["edge"]["modelProbability"] >= result["config"]["minModelProbability"]
     assert result["blockingReasons"] == []
+
+
+def _completed_candles(now, count=90):
+    candles, spot = _candles(count=count)
+    for index, row in enumerate(candles):
+        row[0] = (now - timedelta(minutes=count - index)).timestamp()
+    return candles, spot
+
+
+@pytest.mark.parametrize("ticker", ["KXBTC15M-TEST-00", "KXBTCD-TEST-T64625"])
+def test_completed_history_clean_inputs_preserve_probability_and_sizing(ticker):
+    now = datetime(2026, 9, 5, 16, 0, tzinfo=timezone.utc)
+    indexed, spot = _candles()
+    completed, _ = _completed_candles(now)
+
+    def evaluate(history):
+        return evaluate_btc15_contract(
+            _early_market(now, ticker=ticker, floor_strike=64_625.0),
+            spot_price=spot, candles=history, now=now,
+            reference_time=now, book_time=now,
+        )
+
+    baseline = evaluate(indexed)
+    canonical = evaluate(completed)
+    assert canonical["action"] == baseline["action"]
+    assert canonical["blockingReasons"] == baseline["blockingReasons"]
+    assert canonical["edge"] == baseline["edge"]
+    assert canonical["sizing"] == baseline["sizing"]
+    assert {
+        key: value for key, value in canonical["model"].items()
+        if key != "historyQuality"
+    } == {
+        key: value for key, value in baseline["model"].items()
+        if key != "historyQuality"
+    }
+    assert canonical["model"]["historyQuality"]["status"] == "ready"
+
+
+@pytest.mark.parametrize("repeat", [2, 5])
+def test_duplicate_candles_do_not_inflate_sample_or_change_forecast(repeat):
+    now = datetime(2026, 9, 5, 16, 0, tzinfo=timezone.utc)
+    candles, spot = _completed_candles(now)
+
+    def evaluate(history):
+        return evaluate_btc15_contract(
+            _early_market(now, floor_strike=64_625.0),
+            spot_price=spot, candles=history, now=now,
+            reference_time=now, book_time=now,
+        )
+
+    baseline = evaluate(candles)
+    repeated = evaluate(list(reversed(candles * repeat)))
+    assert repeated["model"]["sampleSize"] == 89
+    assert repeated["model"]["historyQuality"]["duplicateRows"] == 90 * (repeat - 1)
+    for field in ("minuteVolatility", "modelYesProbability", "fairYesProbability", "momentum3m", "momentum5m", "momentum15m", "uncertainty"):
+        assert repeated["model"][field] == baseline["model"][field]
+    assert repeated["action"] == baseline["action"]
+    assert repeated["sizing"] == baseline["sizing"]
+
+
+def test_future_and_unfinished_candles_cannot_change_completed_bar_features():
+    now = datetime(2026, 9, 5, 16, 0, tzinfo=timezone.utc)
+    candles, spot = _completed_candles(now)
+    unfinished = [now.timestamp(), spot * 1.10, spot * 1.10, spot * 1.10, spot * 1.10, 10]
+    future = [now.timestamp() + 3600, spot * 0.90, spot * 0.90, spot * 0.90, spot * 0.90, 10]
+    clean, quality = _completed_minute_history(candles + [unfinished, future], now)
+    expected, _ = _completed_minute_history(candles, now)
+
+    assert clean == expected
+    assert quality["incompleteRows"] == 1
+    assert quality["futureRows"] == 1
+    assert quality["completedRows"] == 90
+    assert quality["latestCompletedAgeSeconds"] == 0
+    assert quality["status"] == "ready"
+    # A bucket is not complete before its exact closing boundary.
+    before_boundary, _ = _completed_minute_history(candles, now - timedelta(microseconds=2))
+    assert len(before_boundary) == 89
+
+
+def test_current_same_venue_candle_jump_remains_guarded_when_partial_bar_is_excluded():
+    now = datetime(2026, 9, 5, 16, 0, tzinfo=timezone.utc)
+    candles, spot = _completed_candles(now)
+    moved_spot = spot * 1.01
+    partial = [now.timestamp(), moved_spot, moved_spot, moved_spot, moved_spot, 10]
+    result = evaluate_btc15_contract(
+        _early_market(now, floor_strike=64_625.0),
+        spot_price=moved_spot, candles=candles + [partial], now=now,
+        reference_time=now, book_time=now,
+    )
+
+    assert result["action"] == "WAIT"
+    assert "volatility_regime" in result["blockingReasons"]
+    assert result["model"]["historyQuality"]["incompleteRows"] == 1
+    assert result["model"]["liveCandleJumpSigma"] > result["config"]["maxJumpSigma"]
+    assert result["model"]["jumpSigma"] >= result["model"]["liveCandleJumpSigma"]
+
+
+def test_nonadjacent_partial_bucket_is_not_used_as_one_minute_jump_evidence():
+    close_at = datetime(2026, 9, 5, 16, 0, tzinfo=timezone.utc)
+    now = close_at + timedelta(seconds=30)
+    candles, spot = _completed_candles(close_at)
+    moved_spot = spot * 1.01
+    partial = [close_at.timestamp() + 1, moved_spot, moved_spot, moved_spot, moved_spot, 10]
+    _, quality = _completed_minute_history(candles + [partial], now)
+
+    # Relative tolerance on a Unix timestamp would silently accept this
+    # one-second discontinuity as an adjacent minute bucket.
+    assert quality["incompleteRows"] == 1
+    assert quality["currentBucketReturn"] is None
+
+
+@pytest.mark.parametrize("basis_bps", [1, 3, 10, 30])
+@pytest.mark.parametrize("age_seconds", [0, 30, 75, 120])
+def test_reference_basis_and_elapsed_time_do_not_create_same_venue_jump(basis_bps, age_seconds):
+    close_at = datetime(2026, 9, 5, 16, 0, tzinfo=timezone.utc)
+    now = close_at + timedelta(seconds=age_seconds)
+    candles, spot = _completed_candles(close_at)
+    result = evaluate_btc15_contract(
+        _early_market(now, floor_strike=64_625.0),
+        spot_price=spot * (1 + basis_bps / 10_000), candles=candles, now=now,
+        reference_time=now, book_time=now,
+        reference_metadata={"isOfficialBrti": True},
+    )
+    assert "volatility_regime" not in result["blockingReasons"]
+    assert result["model"]["liveCandleJumpSigma"] is None
+    assert result["model"]["jumpSigma"] < 1
+    assert result["model"]["historyQuality"]["latestCompletedAgeSeconds"] == age_seconds
+
+
+def test_relative_history_is_explicitly_research_only_and_not_clock_verified():
+    now = datetime(2026, 9, 5, 16, 0, tzinfo=timezone.utc)
+    candles, _ = _candles()
+    clean, quality = _completed_minute_history(candles, now)
+
+    assert len(clean) == 90
+    assert quality["timestampMode"] == "relative_minute_index"
+    assert quality["clockVerified"] is False
+    assert quality["fresh"] is False
+    assert quality["status"] == "relative_index_research_only"
+
+
+@pytest.mark.parametrize("conflicting_duplicate", [False, True])
+def test_recent_candle_gap_does_not_fabricate_a_one_minute_sample(conflicting_duplicate):
+    now = datetime(2026, 9, 5, 16, 0, tzinfo=timezone.utc)
+    candles, spot = _completed_candles(now)
+    if conflicting_duplicate:
+        row = candles[-10]
+        modified = row[4] * 1.0001
+        candles.append([row[0], modified, modified, modified, modified, row[5]])
+    else:
+        candles.pop(-10)
+    result = evaluate_btc15_contract(
+        _early_market(now, floor_strike=64_625.0),
+        spot_price=spot, candles=candles, now=now,
+        reference_time=now, book_time=now,
+    )
+
+    assert result["action"] == "WAIT"
+    assert "history_sample" in result["blockingReasons"]
+    assert result["model"]["sampleSize"] == 8
+    quality = result["model"]["historyQuality"]
+    assert quality["completedRows"] == 9
+    assert quality["gapCount"] == 1
+    assert quality["status"] == "insufficient_contiguous_history"
+    assert quality["conflictingTimestamps"] == int(conflicting_duplicate)
+
+
+def test_old_gap_keeps_enough_recent_contiguous_evidence_without_backfill():
+    now = datetime(2026, 9, 5, 16, 0, tzinfo=timezone.utc)
+    candles, _ = _completed_candles(now)
+    candles.pop(5)
+    clean, quality = _completed_minute_history(candles, now)
+
+    assert len(clean) == 84
+    assert quality["rowsBeforeLastGap"] == 5
+    assert quality["status"] == "ready"
+    assert all(right["time"] - left["time"] == 60 for left, right in zip(clean, clean[1:]))
+
+
+def test_old_history_cannot_be_made_fresh_by_a_live_reference_timestamp():
+    now = datetime(2026, 9, 5, 16, 0, tzinfo=timezone.utc)
+    candles, spot = _completed_candles(now - timedelta(minutes=3))
+    result = evaluate_btc15_contract(
+        _early_market(now, floor_strike=64_625.0),
+        spot_price=spot, candles=candles, now=now,
+        reference_time=now, book_time=now,
+    )
+
+    assert result["action"] == "WAIT"
+    assert "history_sample" in result["blockingReasons"]
+    assert result["model"]["historyQuality"]["status"] == "stale_completed_history"
+    assert result["model"]["historyQuality"]["latestCompletedAgeSeconds"] == 180
+
+
+def test_candle_timestamp_formats_and_iterators_use_the_same_normalized_history():
+    now = datetime(2026, 9, 5, 16, 0, tzinfo=timezone.utc)
+    candles, spot = _completed_candles(now)
+    milliseconds = [[row[0] * 1000, *row[1:]] for row in candles]
+    iso_rows = [{
+        "t": datetime.fromtimestamp(row[0], timezone.utc).isoformat(),
+        "l": row[1], "h": row[2], "o": row[3], "c": row[4], "v": row[5],
+    } for row in candles]
+    expected, _ = _completed_minute_history(candles, now)
+    assert _completed_minute_history(milliseconds, now)[0] == expected
+    assert _completed_minute_history(iso_rows, now)[0] == expected
+
+    def evaluate(history):
+        return evaluate_btc15_contract(
+            _early_market(now, floor_strike=64_625.0),
+            spot_price=spot, candles=history, now=now,
+            reference_time=now, book_time=now,
+        )
+
+    assert evaluate(iter(candles)) == evaluate(candles)
+
+
+def test_invalid_and_mixed_timestamp_rows_do_not_enter_model_history():
+    now = datetime(2026, 9, 5, 16, 0, tzinfo=timezone.utc)
+    candles, spot = _completed_candles(now)
+    malformed = [None, ["bad-time", spot, spot, spot, spot], [True, spot, spot, spot, spot],
+                 [now.timestamp() - 30, 0, spot, spot, spot],
+                 [now.timestamp() - 30, spot, spot, spot, spot * 2],
+                 [now.timestamp() - 30, spot, float("nan"), spot, spot],
+                 {"time": now.timestamp() - 30, "low": 0, "high": spot, "open": spot, "close": spot}]
+    relative = [0, spot, spot, spot, spot]
+    clean, quality = _completed_minute_history(candles + malformed + [relative], now)
+    expected, _ = _completed_minute_history(candles, now)
+
+    assert clean == expected
+    assert quality["invalidRows"] == len(malformed)
+    assert quality["mixedTimestampRows"] == 1
 
 
 @pytest.mark.parametrize(

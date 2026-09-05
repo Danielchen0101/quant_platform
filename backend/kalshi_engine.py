@@ -17,6 +17,7 @@ BTC_15M_SERIES = "KXBTC15M"
 # Fractional cash rounding can make a slightly smaller order more economical.
 # This is a bounded fallback, never a reason to expand an account's risk cap.
 MAX_ECONOMIC_SIZE_SEARCH_STEPS = 1_000
+MAX_COMPLETED_HISTORY_AGE_SECONDS = 120.0
 
 DEFAULT_STRATEGY_CONFIG: Dict[str, Any] = {
     "executionMode": "paper",
@@ -397,44 +398,164 @@ def realized_minute_volatility(returns: Sequence[float]) -> Optional[float]:
 
 def _candle_rows(candles: Iterable[Any]) -> List[Dict[str, float]]:
     rows: List[Dict[str, float]] = []
-    for index, candle in enumerate(candles or []):
-        values: Dict[str, Optional[float]] = {}
+    for candle in candles or []:
+        values: Dict[str, Any] = {}
         if isinstance(candle, Mapping):
-            values = {
-                "time": _number(candle.get("time") or candle.get("t") or candle.get("timestamp")),
-                "low": _number(candle.get("low") or candle.get("l")),
-                "high": _number(candle.get("high") or candle.get("h")),
-                "open": _number(candle.get("open") or candle.get("o")),
-                "close": _number(candle.get("close") or candle.get("c")),
-                "volume": _number(candle.get("volume") or candle.get("v"), 0.0),
-            }
+            for field, aliases in (
+                ("time", ("time", "t", "timestamp")),
+                ("low", ("low", "l")), ("high", ("high", "h")),
+                ("open", ("open", "o")), ("close", ("close", "c")),
+                ("volume", ("volume", "v")),
+            ):
+                values[field] = next((
+                    candle.get(key) for key in aliases
+                    if candle.get(key) not in (None, "")
+                ), None)
         elif isinstance(candle, Sequence) and not isinstance(candle, (str, bytes)) and len(candle) >= 5:
             values = {
-                "time": _number(candle[0]),
-                "low": _number(candle[1]),
-                "high": _number(candle[2]),
-                "open": _number(candle[3]),
-                "close": _number(candle[4]),
-                "volume": _number(candle[5], 0.0) if len(candle) > 5 else 0.0,
+                "time": candle[0],
+                "low": candle[1], "high": candle[2],
+                "open": candle[3], "close": candle[4],
+                "volume": candle[5] if len(candle) > 5 else 0.0,
             }
+        invalid_price = False
+        for field in ("low", "high", "open", "close"):
+            raw_price = values.get(field)
+            parsed_price = _number(raw_price) if not isinstance(raw_price, bool) else None
+            if raw_price not in (None, "") and parsed_price is None:
+                invalid_price = True
+            values[field] = parsed_price
+        if invalid_price:
+            continue
         close = values.get("close")
         if close is None or close <= 0:
             continue
-        low = values.get("low") or close
-        high = values.get("high") or close
-        opened = values.get("open") or close
-        if min(low, high, opened) <= 0 or low > high:
+        raw_time = values.get("time")
+        timestamp = _number(raw_time) if not isinstance(raw_time, bool) else None
+        if timestamp is None and isinstance(raw_time, str):
+            parsed_time = _parse_time(raw_time)
+            timestamp = parsed_time.timestamp() if parsed_time else None
+        if timestamp is None or timestamp < 0:
+            continue
+        # Common adapters use Unix milliseconds; the Coinbase array uses
+        # seconds. Normalize both before deduplication and as-of filtering.
+        if timestamp >= 100_000_000_000:
+            timestamp /= 1000.0
+        low = values.get("low") if values.get("low") is not None else close
+        high = values.get("high") if values.get("high") is not None else close
+        opened = values.get("open") if values.get("open") is not None else close
+        if min(low, high, opened) <= 0 or not low <= min(opened, close) <= max(opened, close) <= high:
             continue
         rows.append({
-            "time": values.get("time") if values.get("time") is not None else float(index),
+            "time": timestamp,
             "low": low,
             "high": high,
             "open": opened,
             "close": close,
-            "volume": values.get("volume") or 0.0,
+            "volume": _number(values.get("volume"), 0.0) or 0.0,
         })
     rows.sort(key=lambda row: row["time"])
     return rows
+
+
+def _completed_minute_history(
+    candles: Iterable[Any],
+    now: datetime,
+) -> Tuple[List[Dict[str, float]], Dict[str, Any]]:
+    """Build one causal, non-duplicated minute sequence for every estimator.
+
+    Coinbase timestamps denote bucket *starts*, not closes. Including the
+    current bucket gives a partial minute the weight of a complete return;
+    counting duplicate/gapped buckets also invalidates the 3m/5m/15m horizons.
+    Retain only the newest contiguous completed run without filling missing
+    prices or choosing between conflicting records for the same timestamp.
+    Small sequential indices remain compatible with offline research fixtures;
+    real epoch-timestamped feeds additionally require recent completed data.
+    """
+    raw = list(candles or [])
+    rows = _candle_rows(raw)
+    by_time: Dict[float, Dict[str, float]] = {}
+    conflicting = set()
+    duplicate_count = 0
+    for row in rows:
+        stamp = row["time"]
+        prior = by_time.get(stamp)
+        if prior is not None:
+            duplicate_count += 1
+            if any(prior[key] != row[key] for key in ("open", "high", "low", "close")):
+                conflicting.add(stamp)
+        else:
+            by_time[stamp] = row
+    ordered = [by_time[stamp] for stamp in sorted(by_time) if stamp not in conflicting]
+    epoch_mode = any(row["time"] >= 1_000_000_000 for row in rows)
+    now_epoch = now.timestamp()
+    incomplete_count = 0
+    future_count = 0
+    mixed_timestamp_count = 0
+    completed = []
+    incomplete = []
+    for row in ordered:
+        stamp = row["time"]
+        if epoch_mode and stamp < 1_000_000_000:
+            mixed_timestamp_count += 1
+        elif epoch_mode and stamp > now_epoch:
+            future_count += 1
+        elif epoch_mode and stamp + 60.0 > now_epoch + 1e-6:
+            incomplete_count += 1
+            incomplete.append(row)
+        else:
+            completed.append(row)
+
+    # A missing minute cannot be re-labelled as a one-minute return, and
+    # stale windows before a gap must not enter short-horizon momentum.
+    expected_step = 60.0 if epoch_mode else 1.0
+    start = 0
+    gap_count = 0
+    for index in range(1, len(completed)):
+        if not math.isclose(completed[index]["time"] - completed[index - 1]["time"], expected_step, rel_tol=0.0, abs_tol=1e-6):
+            gap_count += 1
+            start = index
+    clean = completed[start:]
+    latest_close = clean[-1]["time"] + 60.0 if clean and epoch_mode else None
+    age = max(0.0, now_epoch - latest_close) if latest_close is not None else None
+    fresh = bool(clean) and epoch_mode and age <= MAX_COMPLETED_HISTORY_AGE_SECONDS
+    current_bucket = next((
+        row for row in incomplete
+        if latest_close is not None and math.isclose(row["time"], latest_close, rel_tol=0.0, abs_tol=1e-6)
+    ), None)
+    current_bucket_return = (
+        math.log(current_bucket["close"] / clean[-1]["close"])
+        if current_bucket is not None else None
+    )
+    quality = {
+        "policy": "completed_contiguous_minutes_v1",
+        "timestampMode": "unix_seconds" if epoch_mode else "relative_minute_index",
+        "clockVerified": epoch_mode,
+        "inputRows": len(raw),
+        "invalidRows": len(raw) - len(rows),
+        "duplicateRows": duplicate_count,
+        "conflictingTimestamps": len(conflicting),
+        "futureRows": future_count,
+        "incompleteRows": incomplete_count,
+        "mixedTimestampRows": mixed_timestamp_count,
+        "gapCount": gap_count,
+        "rowsBeforeLastGap": start,
+        "completedRows": len(clean),
+        "requiredCompletedRows": 31,
+        "status": (
+            "insufficient_contiguous_history" if len(clean) < 31
+            else "relative_index_research_only" if not epoch_mode
+            else "stale_completed_history" if not fresh else "ready"
+        ),
+        "latestCompletedAt": _iso(datetime.fromtimestamp(latest_close, timezone.utc)) if latest_close is not None else None,
+        "latestCompletedAgeSeconds": age,
+        "maximumAgeSeconds": MAX_COMPLETED_HISTORY_AGE_SECONDS,
+        "fresh": fresh,
+        # Same-venue partial data is shock evidence only. It never enters the
+        # calibrated volatility, momentum, or sample-size feature sequence.
+        "currentBucketReturn": current_bucket_return,
+    }
+    return clean, quality
 
 
 def _garman_klass_minute_volatility(candles: Iterable[Any]) -> Optional[float]:
@@ -825,9 +946,10 @@ def evaluate_btc15_contract(
         if indicative_points:
             indicative_market_yes = _clamp(sum(indicative_points) / len(indicative_points), 0.001, 0.999)
 
-    returns = minute_return_series(candles)
+    history, history_quality = _completed_minute_history(candles, now)
+    returns = minute_return_series(history)
     close_sigma = realized_minute_volatility(returns)
-    range_sigma = _garman_klass_minute_volatility(candles)
+    range_sigma = _garman_klass_minute_volatility(history)
     if close_sigma is not None and range_sigma is not None:
         sigma_minute = math.sqrt(0.70 * close_sigma * close_sigma + 0.30 * range_sigma * range_sigma)
     else:
@@ -845,6 +967,18 @@ def evaluate_btc15_contract(
         if sigma_minute is not None
         else None
     )
+    live_candle_return = history_quality.get("currentBucketReturn")
+    live_candle_jump_sigma = (
+        abs(live_candle_return) / max(sigma_minute, 1e-9)
+        if live_candle_return is not None and sigma_minute is not None
+        else None
+    )
+    # Removing an unfinished bar from volatility/momentum must not hide a
+    # current shock. Compare the current Coinbase bucket only with the same
+    # venue's immediately preceding completed close: a BRTI/Coinbase basis or
+    # a multi-minute gap must not be misclassified as a one-minute jump.
+    if live_candle_jump_sigma is not None:
+        jump_sigma = max(jump_sigma or 0.0, live_candle_jump_sigma)
     model_yes: Optional[float] = None
     fair_yes: Optional[float] = None
     market_mid: Optional[float] = None
@@ -1037,7 +1171,13 @@ def evaluate_btc15_contract(
         if not selected_levels and selected_price is not None and selected_depth > 0:
             selected_levels = [(selected_price, selected_depth)]
 
-    sample_ok = len(returns) >= 30 and sigma_minute is not None
+    # Indexed fixtures remain available to the pure research engine, but are
+    # explicitly NOT clock-verified/fresh. The Real routing boundary must
+    # reject this compatibility mode rather than treat indices as live times.
+    sample_ok = (
+        len(returns) >= 30 and sigma_minute is not None
+        and (history_quality["fresh"] or not history_quality["clockVerified"])
+    )
     timing_ok = (
         settings["minSecondsToClose"] <= seconds_to_close <= settings["maxSecondsToClose"]
     )
@@ -1188,7 +1328,7 @@ def evaluate_btc15_contract(
         _gate("entry_window", timing_ok, "Entry window", "进场时段", f"{max(0, int(seconds_to_close))}s / {settings['minSecondsToClose']}-{settings['maxSecondsToClose']}s", category="data"),
         _gate("reference_ready", strike_ok, "Reference price", "参考价格", "BRTI strike and BTC reference available" if strike_ok else "missing strike or reference", category="data"),
         _gate("data_freshness", reference_fresh and book_fresh, "Fresh evidence", "数据新鲜度", freshness_detail, category="data"),
-        _gate("history_sample", sample_ok, "Volatility sample", "波动率样本", f"{len(returns)} one-minute returns", category="data"),
+        _gate("history_sample", sample_ok, "Volatility sample", "波动率样本", f"{len(returns)} consecutive completed one-minute returns / min 30 / {history_quality['status']}", category="data"),
         _gate("volatility_regime", volatility_ok, "Stable volatility regime", "波动状态", f"ratio {(volatility_ratio or 0.0):.2f} / jump {(jump_sigma or 0.0):.1f} sigma", category="signal"),
         _gate(
             "model_probability",
@@ -1678,6 +1818,7 @@ def evaluate_btc15_contract(
             "momentum15m": momentum_15m,
             "volatilityRatio": volatility_ratio,
             "jumpSigma": jump_sigma,
+            "liveCandleJumpSigma": live_candle_jump_sigma,
             "marketYesProbability": market_mid,
             "rawMarketYesProbability": raw_market_mid,
             "ladderRawProbability": ladder_raw_probability,
@@ -1696,6 +1837,7 @@ def evaluate_btc15_contract(
             "timeStageUncertaintyPremium": time_stage_uncertainty_premium,
             "referenceAgeSeconds": reference_age,
             "sampleSize": len(returns),
+            "historyQuality": history_quality,
         },
         "edge": {
             "side": side,

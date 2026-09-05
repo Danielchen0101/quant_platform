@@ -122,6 +122,95 @@ def _utc_time_sort_key(value: Any) -> tuple[int, float]:
     return (1, timestamp)
 
 
+def _update_protective_exit_progress(
+    bucket: Dict[str, Any],
+    row: Mapping[str, Any],
+    decision: Mapping[str, Any],
+    order: Optional[Mapping[str, Any]],
+) -> bool:
+    """Keep a small, mode-local stop confirmation cursor across restarts.
+
+    Only authoritative execution cycles call ``record``. Browser refreshes
+    cannot build a streak, and full decision rows need not be persisted for
+    this safety mechanism to survive a worker handoff.
+    """
+    ticker = str(row.get("ticker") or "")
+    if not _entry_confirmation_family(ticker):
+        return False
+    strategy = bucket["strategy"]
+    cursors = dict(strategy.get("protectiveExitConfirmations") or {})
+    previous = dict(cursors.get(ticker) or {})
+    timestamp = _utc_time_sort_key(row.get("generatedAt"))[1]
+    previous_timestamp = _utc_time_sort_key(previous.get("generatedAt"))[1]
+    if previous and timestamp < previous_timestamp:
+        return False
+    confirmation = dict(decision.get("protectiveConfirmation") or {})
+    side = str((row.get("account") or {}).get("heldSide") or "").upper()
+    eligible = bool(
+        timestamp > 0
+        and side in {"YES", "NO"}
+        and confirmation.get("required")
+        and not confirmation.get("emergencyBypass")
+        and confirmation.get("dataQualityEligible") is True
+        and _number(confirmation.get("streak")) >= 1
+        and not (order and str(row.get("action") or "").startswith("SELL_"))
+    )
+    if not eligible:
+        if previous:
+            cursors.pop(ticker, None)
+            strategy["protectiveExitConfirmations"] = cursors
+            return True
+        return False
+    # Repeated data, even if a caller supplied an inflated streak, must never
+    # become multiple independent confirmations. A changed side breaks it.
+    if previous and timestamp == previous_timestamp:
+        if previous.get("side") == side:
+            return False
+        cursors.pop(ticker, None)
+        strategy["protectiveExitConfirmations"] = cursors
+        return True
+    required = max(2, min(6, int(_number(confirmation.get("requiredSnapshots"), 3))))
+    max_gap = max(10.0, min(90.0, _number(confirmation.get("maxGapSeconds"), 30.0)))
+    continuous = bool(
+        previous.get("side") == side
+        and previous.get("dataQualityEligible") is True
+        and 0 < timestamp - previous_timestamp <= max_gap
+    )
+    streak = min(
+        required,
+        max(1, int(_number(confirmation.get("streak"), 1))),
+        max(1, int(_number(previous.get("streak"), 1))) + 1 if continuous else 1,
+    )
+    progress = {
+        "ticker": ticker,
+        "side": side,
+        "generatedAt": row["generatedAt"],
+        "streak": streak,
+        "requiredSnapshots": required,
+        "confirmed": streak >= required,
+        "dataQualityEligible": True,
+        "maxGapSeconds": max_gap,
+    }
+    changed = bool(
+        not continuous
+        or previous.get("streak") != streak
+        or previous.get("requiredSnapshots") != required
+        or previous.get("maxGapSeconds") != max_gap
+    )
+    cursors[ticker] = progress
+    # An hourly ladder can have more than one held strike. Do not overwrite
+    # one position's evidence with another's, or accumulate expired markets.
+    cursors = {
+        key: value for key, value in sorted(
+            cursors.items(),
+            key=lambda item: _utc_time_sort_key(item[1].get("generatedAt")),
+        )[-16:]
+        if timestamp - _utc_time_sort_key(value.get("generatedAt"))[1] <= 90
+    }
+    strategy["protectiveExitConfirmations"] = cursors
+    return changed
+
+
 def _money(row: Mapping[str, Any], dollar_keys, cent_keys=()) -> float:
     for key in dollar_keys:
         value = row.get(key)
@@ -1598,6 +1687,9 @@ class KalshiRobotState:
                 "entryConfirmation": dict(
                     decision.get("entryConfirmation") or {}
                 ),
+                "protectiveConfirmation": dict(
+                    decision.get("protectiveConfirmation") or {}
+                ),
                 "engine": decision.get("engine"),
                 "features": {
                     "selectedSide": decision.get("side"),
@@ -1614,6 +1706,7 @@ class KalshiRobotState:
                     "momentum3m": (decision.get("model") or {}).get("momentum3m"),
                     "momentum5m": (decision.get("model") or {}).get("momentum5m"),
                     "momentum15m": (decision.get("model") or {}).get("momentum15m"),
+                    "historyQuality": dict((decision.get("model") or {}).get("historyQuality") or {}),
                     "volatilityRatio": (decision.get("model") or {}).get("volatilityRatio"),
                     "jumpSigma": (decision.get("model") or {}).get("jumpSigma"),
                     "distanceBps": (decision.get("model") or {}).get("distanceBps"),
@@ -1756,6 +1849,9 @@ class KalshiRobotState:
                     durable_progress.pop(confirmation_family, None)
                     strategy["entryConfirmations"] = durable_progress
                     confirmation_progress_changed = True
+            protective_progress_changed = _update_protective_exit_progress(
+                bucket, row, decision, order,
+            )
             bucket["decisions"].insert(0, row)
             bucket["decisions"] = bucket["decisions"][:MAX_DECISION_RECORDS]
             bucket["decisionLimit"] = MAX_DECISION_RECORDS
@@ -1792,6 +1888,7 @@ class KalshiRobotState:
                 order
                 or row["orderFilled"]
                 or confirmation_progress_changed
+                or protective_progress_changed
             )
             # Routine WAIT/HOLD decisions are an in-memory operator view. A
             # full-state heartbeat previously uploaded hundreds of kilobytes

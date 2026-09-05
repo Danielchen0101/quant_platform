@@ -1,6 +1,29 @@
 import json
 
-from kalshi_paper import KalshiPaperAccountStore, taker_fill_amounts
+from kalshi_paper import KalshiPaperAccountStore, aggregate_taker_sale, taker_fill_amounts
+
+
+def test_fractional_sale_rounds_seller_credit_not_buyer_debit():
+    sale = aggregate_taker_sale([(0.80, 0.33)], 0.33, 0.80)
+    assert sale["trade_fee"] == 0.0037
+    assert sale["gross_proceeds"] == 0.264
+    assert sale["credit_cents"] == 26
+    assert sale["fee_cost"] == 0.004
+
+
+def test_sale_aggregates_order_rounding_and_respects_limit():
+    sale = aggregate_taker_sale([(0.80, 0.33), (0.79, 0.33), (0.70, 1)], 1, 0.79)
+    assert sale["fill_count"] == 0.66
+    assert sale["remaining_count"] == 0.34
+    assert sale["trade_fee"] == 0.0076
+    assert sale["credit_cents"] == 51
+
+
+def test_zero_fee_fractional_sale_still_rounds_credit_once():
+    sale = aggregate_taker_sale([(0.80, 0.33)], 0.33, 0.80, fee_multiplier=0)
+    assert sale["trade_fee"] == 0
+    assert sale["credit_cents"] == 26
+    assert sale["fee_cost"] == 0.004
 
 
 def test_official_general_event_taker_fee_and_account_rounding():

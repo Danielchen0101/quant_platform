@@ -244,14 +244,21 @@ def _aggregate_fill(
     }
 
 
-def _aggregate_sale(
+def aggregate_taker_sale(
     levels: Sequence[Tuple[float, float]],
     requested: float,
     limit_price: float,
     *,
     fee_multiplier: float = 1.0,
 ) -> Dict[str, Any]:
-    """Fill a reduce-only sale against bids and conservatively round proceeds."""
+    """Price a reduce-only sale with seller-side, order-level fee rounding.
+
+    The signed seller balance change is revenue minus trade fees, rounded
+    down to a whole cent. Reusing a buyer's rounded debit as the seller fee
+    would charge an extra cent for some fractional quantities. Accumulating
+    before the final floor also incorporates same-order rounding rebates.
+    This pure helper is shared by paper execution and live exit estimates.
+    """
     fills: List[Dict[str, Any]] = []
     requested_units = _quantity_units(requested)
     remaining_units = requested_units
@@ -748,7 +755,7 @@ class KalshiPaperAccountStore:
             levels = executable_bid_levels(side, orderbook)
             if not levels and reduce_count > 0 and base_price + 1e-9 >= limit:
                 levels = [(base_price, reduce_count)]
-            execution = _aggregate_sale(
+            execution = aggregate_taker_sale(
                 levels,
                 reduce_count,
                 limit,
@@ -980,6 +987,7 @@ class KalshiPaperAccountStore:
 
 
 __all__ = [
+    "aggregate_taker_sale",
     "DEFAULT_STARTING_BALANCE_CENTS",
     "KalshiPaperAccountStore",
     "taker_fill_amounts",

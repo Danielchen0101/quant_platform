@@ -1523,6 +1523,102 @@ def test_entry_confirmation_persists_compact_cursor_and_clears_invalid_frame(tmp
     assert "btc15m" not in store.get("user-a", environment="real")["strategy"]["entryConfirmations"]
 
 
+def _protective_decision(timestamp, streak=1, ticker="KXBTC15M-PROTECT", **overrides):
+    return {
+        "generatedAt": timestamp,
+        "action": "WAIT",
+        "side": "NO",
+        "config": {"executionMode": "real"},
+        "market": {"ticker": ticker},
+        "account": {"heldSide": "YES", "heldCount": 1},
+        "blockingReasons": ["protective_exit_confirmation"],
+        "protectiveConfirmation": {
+            "required": True,
+            "requiredSnapshots": 3,
+            "streak": streak,
+            "confirmed": streak >= 3,
+            "dataQualityEligible": True,
+            "maxGapSeconds": 30,
+        },
+        **overrides,
+    }
+
+
+def test_protective_confirmation_is_compact_durable_and_unique(tmp_path):
+    durable, saves = {}, []
+
+    def save(user_id, payload):
+        durable[user_id] = copy.deepcopy(payload)
+        saves.append(copy.deepcopy(payload))
+        return {"version": len(saves)}
+
+    store = KalshiRobotState(str(tmp_path / "state.json"), state_loader=durable.get, state_saver=save)
+    first = _protective_decision("2026-09-05T20:00:00Z")
+    store.record("user-a", first)
+    assert len(saves) == 1
+    bucket = saves[-1]["modeState"]["real"]
+    assert "decisions" not in bucket
+    assert bucket["strategy"]["protectiveExitConfirmations"]["KXBTC15M-PROTECT"]["streak"] == 1
+
+    # An identical frame claiming three confirmations cannot advance.
+    store.record("user-a", _protective_decision("2026-09-05T20:00:00Z", 3))
+    assert len(saves) == 1
+    restored = KalshiRobotState(str(tmp_path / "restore.json"), state_loader=durable.get, state_saver=save)
+    restored.record("user-a", _protective_decision("2026-09-05T20:00:05Z", 2))
+    assert len(saves) == 2
+    assert saves[-1]["modeState"]["real"]["strategy"]["protectiveExitConfirmations"]["KXBTC15M-PROTECT"]["streak"] == 2
+    restored.record("user-a", _protective_decision("2026-09-05T20:00:10Z", 3))
+    assert len(saves) == 3
+    cursor = saves[-1]["modeState"]["real"]["strategy"]["protectiveExitConfirmations"]["KXBTC15M-PROTECT"]
+    assert cursor["confirmed"] is True
+    assert cursor["side"] == "YES"  # Held side, not the opposite new-entry signal.
+    # Once capped, repeated qualifying cycles don't rewrite the full ledger.
+    restored.record("user-a", _protective_decision("2026-09-05T20:00:15Z", 3))
+    assert len(saves) == 3
+    # Only compact metadata, not a raw candle/book payload, is required.
+    assert len(json.dumps(cursor)) < 400
+
+
+def test_protective_confirmation_clears_invalid_frames_and_sale_orders(tmp_path):
+    store = KalshiRobotState(str(tmp_path / "state.json"))
+    ticker = "KXBTC15M-PROTECT"
+
+    def progress():
+        return store.get("user-a", environment="real")["strategy"].get("protectiveExitConfirmations", {})
+
+    store.record("user-a", _protective_decision("2026-09-05T20:00:00Z"))
+    # The other family/strike is independent; older invalid records cannot
+    # erase the latest confirmed evidence for this position.
+    store.record("user-a", _protective_decision("2026-09-05T20:00:02Z", ticker="KXBTCD-OTHER"))
+    store.record("user-a", _protective_decision("2026-09-05T19:59:59Z", protectiveConfirmation={}))
+    assert ticker in progress() and "KXBTCD-OTHER" in progress()
+    store.record("user-a", _protective_decision("2026-09-05T20:00:05Z", protectiveConfirmation={}))
+    assert ticker not in progress()
+    assert "KXBTCD-OTHER" in progress()
+    # Missing/invalid quality explicitly breaks continuity at the same time.
+    candidate = _protective_decision("2026-09-05T20:00:10Z")
+    store.record("user-a", candidate)
+    store.record("user-a", {**candidate, "protectiveConfirmation": {**candidate["protectiveConfirmation"], "dataQualityEligible": False}})
+    assert ticker not in progress()
+    store.record("user-a", _protective_decision("2026-09-05T20:00:15Z"))
+    store.record("user-a", _protective_decision("2026-09-05T20:00:20Z", 2, action="SELL_YES"), {"order_id": "close-1", "status": "canceled", "fill_count_fp": "0.00"})
+    assert ticker not in progress()  # Reevaluate position after any routed sale.
+
+
+def test_protective_confirmation_resets_stale_changed_side_and_is_bounded(tmp_path):
+    store = KalshiRobotState(str(tmp_path / "state.json"))
+    store.record("user-a", _protective_decision("2026-09-05T20:00:00Z"))
+    store.record("user-a", _protective_decision("2026-09-05T20:00:40Z", 3))
+    cursor = store.get("user-a", environment="real")["strategy"]["protectiveExitConfirmations"]["KXBTC15M-PROTECT"]
+    assert cursor["streak"] == 1 and not cursor["confirmed"]
+    store.record("user-a", _protective_decision("2026-09-05T20:00:45Z", 3, account={"heldSide": "NO"}))
+    cursor = store.get("user-a", environment="real")["strategy"]["protectiveExitConfirmations"]["KXBTC15M-PROTECT"]
+    assert cursor["side"] == "NO" and cursor["streak"] == 1
+    for index in range(20):
+        store.record("user-a", _protective_decision("2026-09-05T20:00:50Z", ticker=f"KXBTCD-{index}"))
+    assert len(store.get("user-a", environment="real")["strategy"]["protectiveExitConfirmations"]) == 16
+
+
 def test_transient_errors_never_rewrite_full_durable_state(tmp_path):
     calls = []
 

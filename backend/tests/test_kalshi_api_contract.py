@@ -46,6 +46,8 @@ from kalshi_api import (
     _pnl_stability_metrics,
     _protective_exit_state,
     _protective_exit_confirmation,
+    _protective_confirmation_data_quality,
+    _voluntary_exit_route_economics,
     _recent_filled_entry_age,
     _recent_filled_exit_age,
     _real_preflight_account_health,
@@ -57,6 +59,58 @@ from kalshi_api import (
     _PublicDataClient,
     register_kalshi_api,
 )
+
+
+@pytest.mark.parametrize("timestamp,start,end", [
+    ("2026-09-05T20:52:17", "2026-09-05T15:53:00Z", "2026-09-05T20:53:00Z"),
+    ("2026-09-05T20:52:17+00:00", "2026-09-05T15:53:00Z", "2026-09-05T20:53:00Z"),
+    ("2026-09-05T20:59:59.999999+00:00", "2026-09-05T16:00:00Z", "2026-09-05T21:00:00Z"),
+    ("2026-09-05T23:59:59+00:00", "2026-09-05T19:00:00Z", "2026-09-06T00:00:00Z"),
+    ("2026-09-05T23:59:59-04:00", "2026-09-05T23:00:00Z", "2026-09-06T04:00:00Z"),
+])
+def test_coinbase_candle_window_is_bounded_utc_and_minute_aligned(timestamp, start, end):
+    params = kalshi_api._coinbase_btc_candle_params(datetime.fromisoformat(timestamp))
+    assert params == {"granularity": 60, "start": start, "end": end}
+    assert (datetime.fromisoformat(end.replace("Z", "+00:00")) - datetime.fromisoformat(start.replace("Z", "+00:00"))).total_seconds() == 300 * 60
+
+
+@pytest.mark.parametrize("use_naive", [False, True])
+def test_snapshot_bounded_candle_window_preserves_shared_cache_ttl_across_minute_rollover(monkeypatch, use_naive):
+    now = datetime(2026, 9, 5, 20, 59, 59, tzinfo=timezone.utc)
+    http_calls, cache_calls = [], []
+
+    def fake_get(url, params=None, **_kwargs):
+        if url.endswith("/candles"):
+            http_calls.append(dict(params or {}))
+            return _Response([[int(now.timestamp()) - 119, 65000, 65001, 65000, 65000, 1]])
+        if url.endswith("/orderbook"):
+            return _Response({"orderbook_fp": {"yes_dollars": [["0.49", "100"]], "no_dollars": [["0.49", "100"]]}})
+        raise AssertionError(url)
+
+    client = _PublicDataClient(http_get=fake_get)
+    monkeypatch.setattr(client, "_market_candidates", lambda *_args: ({"ticker": "KXBTC15M-WINDOW"}, "active"))
+    cached_json = client._cached_json
+
+    def capture_cache(key, url, **kwargs):
+        if url.endswith("/candles"):
+            cache_calls.append((key, kwargs))
+        return cached_json(key, url, **kwargs)
+
+    monkeypatch.setattr(client, "_cached_json", capture_cache)
+    override = {"price": 65000, "isOfficialBrti": True, "timestamp": now.isoformat()}
+    request_now = now.replace(tzinfo=None) if use_naive else now
+    first = client.snapshot(now=request_now, reference_override=override)
+    second = client.snapshot(now=request_now + timedelta(seconds=2), reference_override=override)
+    assert len(cache_calls) == 2
+    assert len(http_calls) == 1  # A new minute does not bypass the existing TTL.
+    assert http_calls[0] == {"granularity": 60, "start": "2026-09-05T16:00:00Z", "end": "2026-09-05T21:00:00Z"}
+    assert cache_calls[1][1]["params"]["end"] == "2026-09-05T21:01:00Z"
+    for key, kwargs in cache_calls:
+        assert key == "coinbase-btc-candles-1m"
+        assert kwargs["ttl"] == 15.0
+        assert kwargs["max_stale"] == 120.0
+    assert first["reference"]["candles"] == second["reference"]["candles"]
+    assert first["reference"]["candles"][0][0] == int(now.timestamp()) - 119
 
 
 def test_dual_market_live_policies_are_separately_calibrated():
@@ -5275,6 +5329,218 @@ def test_reduce_only_sale_estimate_uses_depth_weighted_price_and_fees():
     assert estimate["netProceeds"] < estimate["grossProceeds"]
 
 
+@pytest.mark.parametrize("side", ["YES", "NO"])
+def test_reduce_sale_estimate_matches_seller_credit_rounding(side):
+    estimate = _estimate_reduce_only_sale(side, 0.33, {side.lower(): [[0.80, 0.33]]})
+    assert estimate["netProceeds"] == 0.26
+    assert estimate["estimatedExitFee"] == 0.004
+    assert estimate["estimatedExitTradeFee"] == 0.0037
+
+
+def _voluntary_sale_decision(side="YES", break_even=0.7425742574257426):
+    return {
+        "action": f"SELL_{side}", "side": side,
+        "edge": {"price": 0.78, "conservativeEdge": 0.03, "minimumConservativeEdge": 0},
+        "sizing": {"contracts": 1.01},
+        "exitAnalysis": {
+            "trigger": "fee_adjusted_take_profit",
+            "breakEvenExitValuePerContract": break_even,
+            "heldProbability": 0.73,
+            "routeQuote": _estimate_reduce_only_sale(side, 0.50, {side.lower(): [[0.78, 0.50]]}),
+        },
+    }
+
+
+@pytest.mark.parametrize("side", ["YES", "NO"])
+def test_voluntary_sale_tightens_ioc_limit_before_scale_out_can_realize_loss(side):
+    decision = _voluntary_sale_decision(side)
+    payload = _paper_order_payload(decision, "KXBTC15M-EXIT", count_override=0.50, price_tolerance=0.01)
+    assert payload["user_side_limit_price"] == "0.7700"
+    unsafe = _voluntary_exit_route_economics(decision, payload, {}, allow_tightening=False)
+    assert unsafe["allowed"] is False
+    assert unsafe["netExitPnl"] == pytest.approx(-0.0012871287128712883)
+    protected = _voluntary_exit_route_economics(decision, payload, {})
+    assert protected["allowed"] is True
+    assert protected["limitTightened"] is True
+    assert protected["minimumExecutionPrice"] == 0.78
+    assert protected["netExitPnlPerContract"] >= 0.015
+    decision["exitAnalysis"]["routeEconomics"] = protected
+    final = _paper_order_payload(decision, "KXBTC15M-EXIT", count_override=0.50, price_tolerance=0.01)
+    assert final["count"] == "0.50"
+    assert final["user_side_limit_price"] == "0.7800"
+    assert _voluntary_exit_route_economics(decision, final, {}, allow_tightening=False)["allowed"] is True
+
+
+@pytest.mark.parametrize("side", ["YES", "NO"])
+def test_voluntary_exit_requires_observed_fragmented_slice_profit_not_single_fill_only(side):
+    decision = _voluntary_sale_decision(side, break_even=0.65)
+    decision["edge"]["price"] = 0.7155
+    decision["exitAnalysis"]["heldProbability"] = 0.60
+    quote = _estimate_reduce_only_sale(side, 0.10, {side.lower(): [[0.7156, 0.05], [0.7155, 0.05]]})
+    decision["exitAnalysis"]["routeQuote"] = quote
+    payload = _paper_order_payload(decision, "KXBTC15M-FRAGMENTED", count_override=0.10)
+    guard = _voluntary_exit_route_economics(decision, payload, {})
+    assert quote["netProceeds"] == 0.06
+    assert guard["singleFillLimitNetProceeds"] == 0.07
+    assert guard["routeQuoteMatchesPayload"] is True
+    assert guard["observedSliceProfitable"] is False
+    assert guard["netExitPnl"] == pytest.approx(-0.005)
+    assert guard["allowed"] is False
+    assert _voluntary_exit_route_economics(decision, payload, {}, allow_tightening=False)["allowed"] is False
+    ticker = payload["ticker"]
+    state = {"filledTrades": [{"orderFilled": True, "orderId": "fragmented-entry", "ticker": ticker,
+                                "action": f"BUY_{side}", "side": side, "fillCount": 0.10}]}
+    account = {"orders": [], "positions": [{"ticker": ticker, "position_fp": 0.10 if side == "YES" else -0.10,
+                                            f"{side.lower()}_count_fp": 0.10, "market_exposure_dollars": 0.065}]}
+    controller = _PaperRobotController(None, None, None)
+    with pytest.raises(KalshiApiError) as failed:
+        controller._validate_live_order_preflight(state, account, payload, _live_order_payload(payload), decision)
+    assert failed.value.code == "kalshi_live_voluntary_exit_economics_changed"
+    decision["exitAnalysis"]["trigger"] = "protective_stop_loss"
+    assert _voluntary_exit_route_economics(decision, payload, {}) == {"applicable": False, "allowed": True}
+    assert controller._validate_live_order_preflight(state, account, payload, _live_order_payload(payload), decision) is None
+
+
+@pytest.mark.parametrize("change", [
+    None, {"requestedCount": 1.0}, {"fillableCount": 0.49}, {"takerFeeRate": 0.14},
+    {"grossProceeds": 0.80}, {"netProceeds": None}, {"worstBid": 0.77},
+])
+def test_voluntary_exit_rejects_missing_or_mismatched_ladder_quote(change):
+    decision = _voluntary_sale_decision()
+    payload = _paper_order_payload(decision, "KXBTC15M-EXIT", count_override=0.50)
+    if change is None:
+        decision["exitAnalysis"].pop("routeQuote")
+    else:
+        decision["exitAnalysis"]["routeQuote"].update(change)
+    guard = _voluntary_exit_route_economics(decision, payload, {}, allow_tightening=False)
+    assert guard["allowed"] is False
+    assert guard["routeQuoteMatchesPayload"] is False
+
+
+def test_final_exit_size_change_cannot_prorate_old_slice_economics():
+    decision = _voluntary_sale_decision()
+    payload = _paper_order_payload(decision, "KXBTC15M-EXIT", count_override=0.50)
+    assert _voluntary_exit_route_economics(decision, payload, {}, allow_tightening=False)["allowed"] is True
+    payload["count"] = "0.25"
+    changed = _voluntary_exit_route_economics(decision, payload, {}, allow_tightening=False)
+    assert changed["allowed"] is False
+    assert changed["routeQuoteMatchesPayload"] is False
+
+
+def test_voluntary_exit_does_not_increase_size_when_scale_out_is_uneconomic():
+    decision = _voluntary_sale_decision(break_even=0.75)
+    full = _estimate_reduce_only_sale("YES", 1.01, {"yes": [[0.78, 1.01]]})
+    assert full["netProceeds"] / 1.01 - 0.75 > 0.01
+    payload = _paper_order_payload(decision, "KXBTC15M-EXIT", count_override=0.50, price_tolerance=0.01)
+    guard = _voluntary_exit_route_economics(decision, payload, {"minimumExitProfit": 0.01})
+    # 0.38/0.5 - 0.75 = 0.01 is allowed; higher configured profit must wait.
+    assert guard["allowed"] is True
+    assert _voluntary_exit_route_economics(decision, payload, {"minimumExitProfit": 0.012})["allowed"] is False
+    assert payload["count"] == "0.50"
+
+
+@pytest.mark.parametrize("side", ["YES", "NO"])
+def test_tick_prices_voluntary_scale_out_from_actual_shallow_slice(monkeypatch, side):
+    ticker = "KXBTC15M-SHALLOW-EXIT"
+    now = datetime.now(timezone.utc).isoformat()
+    config = {"executionMode": "paper", "takeProfitScaleOutPct": 0.50}
+
+    class State:
+        def get(self, _user_id, *, environment=None):
+            return {"enabled": True, "activeEnvironment": "paper", "config": config,
+                    "strategy": {}, "tradedTickers": [], "filledTrades": []}
+
+    class Client:
+        def snapshot(self, **_kwargs):
+            return {
+                "market": {"ticker": ticker},
+                "reference": {"price": 65_000, "candles": [], "timestamp": now},
+                "orderbook": {side.lower(): [[0.85, 2], [0.65, 2]]},
+                "orderbookAsOf": now, "warnings": [],
+            }
+
+    decision = {
+        "generatedAt": now, "action": "WAIT", "side": side,
+        "model": {"fairYesProbability": 0.70 if side == "YES" else 0.30},
+        "market": {"ticker": ticker}, "edge": {"price": 0.85, "conservativeEdge": 0.03},
+        "sizing": {"contracts": 0}, "gates": [], "blockingReasons": [], "config": config,
+    }
+    monkeypatch.setattr(kalshi_api, "evaluate_btc15_contract", lambda *_args, **_kwargs: copy.deepcopy(decision))
+    controller = _PaperRobotController(Client(), State(), None)
+    monkeypatch.setattr(controller, "portfolio", lambda *_args, **_kwargs: {
+        "environment": "paper", "balance": {"balance": 100_000, "portfolio_value": 300},
+        "positions": [{"ticker": ticker, f"{side.lower()}_count_fp": 4,
+                       f"{side.lower()}_average_price_dollars": 0.68,
+                       f"{side.lower()}_fee_cost_dollars": 0.04,
+                       "last_trade_at": "2020-01-01T00:00:00Z"}],
+        "orders": [], "fills": [], "settlements": [],
+    })
+    result = controller.tick("u", submit_order=False, mode="paper")
+    actual = result["decision"]
+    assert actual["action"] == f"SELL_{side}"
+    assert actual["positionManagement"]["routedContracts"] == 2
+    assert actual["exitAnalysis"]["worstBid"] == 0.65  # Original full-holding eligibility retained.
+    assert actual["exitAnalysis"]["routeQuote"]["worstBid"] == 0.85
+    assert actual["edge"]["price"] == 0.85
+    assert actual["exitAnalysis"]["routeEconomics"]["allowed"] is True
+    payload = _paper_order_payload(actual, ticker, count_override=2, price_tolerance=0.01)
+    assert payload["count"] == "2.00"
+    assert payload["user_side_reference_price"] == "0.8500"
+    assert payload["user_side_limit_price"] == "0.8400"
+    observation = _market_observation("paper", actual)
+    assert observation["features"]["exitAnalysis"]["routeQuote"]["requestedCount"] == 2
+
+
+@pytest.mark.parametrize("trigger", ["emergency_stop_loss", "protective_stop_loss"])
+def test_urgent_exit_bypasses_voluntary_profit_gate(trigger):
+    decision = _voluntary_sale_decision()
+    decision["exitAnalysis"]["trigger"] = trigger
+    payload = _paper_order_payload(decision, "KXBTC15M-EXIT", count_override=0.50, price_tolerance=0.01)
+    assert _voluntary_exit_route_economics(decision, payload, {}) == {"applicable": False, "allowed": True}
+
+
+def test_sale_fee_reconciliation_uses_route_price_and_seller_rounding():
+    decision = _voluntary_sale_decision()
+    decision["exitAnalysis"]["routeEconomics"] = {"allowed": True, "minimumExecutionPrice": 0.80}
+    decision["sizing"]["allInFee"] = 99
+    reconciliation = _fee_reconciliation(decision, {"count_fp": 0.33, "fill_count_fp": 0.33, "fee_cost_dollars": 0.004})
+    assert reconciliation["expectedPrice"] == 0.80
+    assert reconciliation["expectedFeeDollars"] == 0.004
+    assert reconciliation["feeVarianceDollars"] == 0
+    assert reconciliation["expectedCashDebitDollars"] is None
+    assert reconciliation["expectedCashCreditDollars"] == 0.26
+
+
+def test_real_preflight_catches_unprotected_voluntary_exit_but_preserves_stops():
+    controller = _PaperRobotController(None, None, None)
+    ticker = "KXBTC15M-EXIT"
+    decision = _voluntary_sale_decision()
+    decision["model"] = {"historyQuality": {"clockVerified": False}}
+    state = {"filledTrades": [{"orderFilled": True, "orderId": "managed-entry", "ticker": ticker,
+                                "action": "BUY_YES", "side": "YES", "fillCount": 1.01}]}
+    account = {"orders": [], "positions": [{"ticker": ticker, "position_fp": 1.01,
+                                            "yes_count_fp": 1.01, "market_exposure_dollars": 0.73}]}
+    payload = _paper_order_payload(decision, ticker, count_override=0.50, price_tolerance=0.01)
+    with pytest.raises(KalshiApiError) as failed:
+        controller._validate_live_order_preflight(state, account, payload, _live_order_payload(payload), decision)
+    assert failed.value.code == "kalshi_live_voluntary_exit_economics_changed"
+    decision["exitAnalysis"]["trigger"] = "protective_stop_loss"
+    assert controller._validate_live_order_preflight(state, account, payload, _live_order_payload(payload), decision) is None
+
+
+def test_real_buy_rejects_explicit_unverified_candle_clock_and_observation_keeps_quality():
+    decision = _shard_test_decision()
+    quality = {"clockVerified": False, "reason": "relative_fixture_timestamps"}
+    decision["model"] = {"historyQuality": quality}
+    payload = _paper_order_payload(decision, decision["market"]["ticker"], exchange_index=2)
+    with pytest.raises(KalshiApiError) as failed:
+        _PaperRobotController(None, None, None)._validate_live_order_preflight(
+            {}, {"orders": []}, payload, _live_order_payload(payload), decision,
+        )
+    assert failed.value.code == "kalshi_live_history_clock_unverified"
+    assert _market_observation("real", decision)["features"]["model"]["historyQuality"] == quality
+
+
 def test_two_hourly_holdings_prioritize_emergency_exit_over_add():
     add_ticker = "KXBTCD-27JUL2613-T64000"
     emergency_ticker = "KXBTCD-27JUL2613-T66000"
@@ -5774,6 +6040,132 @@ def test_protective_exit_requires_durable_streak_but_emergency_is_immediate():
     assert confirmed["confirmed"] is True
     assert emergency["confirmed"] is True
     assert emergency["emergencyBypass"] is True
+
+
+def _protective_cursor_fixture():
+    now = datetime(2026, 9, 5, 12, 0, tzinfo=timezone.utc)
+    ticker = "KXBTC15M-CURSOR"
+    cursor = {
+        "ticker": ticker, "side": "YES", "generatedAt": (now - timedelta(seconds=5)).isoformat(),
+        "streak": 2, "requiredSnapshots": 3, "confirmed": False,
+        "dataQualityEligible": True, "maxGapSeconds": 30,
+    }
+    return now, ticker, cursor
+
+
+def test_protective_confirmation_recovers_compact_cursor_without_full_history():
+    now, ticker, cursor = _protective_cursor_fixture()
+    result = _protective_exit_confirmation(
+        {"strategy": {"protectiveExitConfirmations": {ticker: cursor}}},
+        ticker, "YES", {"protectiveLossExit": True}, {}, generated_at=now,
+    )
+    assert result["streak"] == 3
+    assert result["confirmed"] is True
+    assert result["durableProgressUsed"] is True
+
+
+def test_protective_confirmation_api_and_state_survive_restart_each_cycle(tmp_path):
+    durable = {}
+
+    def save(user_id, payload):
+        durable[user_id] = copy.deepcopy(payload)
+        return {"version": len(durable)}
+
+    now, ticker, _cursor = _protective_cursor_fixture()
+    for index in range(3):
+        store = kalshi_api.KalshiRobotState(str(tmp_path / f"state-{index}.json"),
+                                           state_loader=durable.get, state_saver=save)
+        generated = now + timedelta(seconds=5 * index)
+        confirmation = _protective_exit_confirmation(
+            store.get("u", environment="real"), ticker, "YES",
+            {"protectiveLossExit": True}, {}, generated_at=generated,
+        )
+        assert confirmation["streak"] == index + 1
+        store.record("u", {
+            "generatedAt": generated.isoformat(), "action": "WAIT", "side": "NO",
+            "config": {"executionMode": "real"}, "market": {"ticker": ticker},
+            "account": {"heldSide": "YES", "heldCount": 1},
+            "blockingReasons": ["protective_exit_confirmation"],
+            "protectiveConfirmation": confirmation,
+        })
+        assert "decisions" not in durable["u"]["modeState"]["real"]
+    assert confirmation["confirmed"] is True
+
+
+@pytest.mark.parametrize("change", [
+    {"generatedAt": "2026-09-05T12:00:00+00:00"},
+    {"generatedAt": "2026-09-05T12:00:01+00:00"},
+    {"generatedAt": "2026-09-05T11:58:00+00:00"},
+    {"side": "NO"}, {"dataQualityEligible": False}, {"streak": 0},
+    {"required": False}, {"emergencyBypass": True},
+])
+def test_invalid_protective_cursor_never_resurrects_older_eligible_history(change):
+    now, ticker, cursor = _protective_cursor_fixture()
+    result = _protective_exit_confirmation(
+        {"strategy": {"protectiveExitConfirmations": {ticker: {**cursor, **change}}},
+         "decisions": [{"ticker": ticker, "generatedAt": cursor["generatedAt"],
+                        "account": {"heldSide": "YES"}, "blockingReasons": ["protective_exit_confirmation"]}]},
+        ticker, "YES", {"protectiveLossExit": True}, {}, generated_at=now,
+    )
+    assert result["streak"] == 1
+    assert result["confirmed"] is False
+
+
+@pytest.mark.parametrize("metadata", [
+    {}, {"dataQualityEligible": False}, {"dataQualityEligible": True, "required": False},
+    {"dataQualityEligible": True, "emergencyBypass": True}, {"dataQualityEligible": True, "streak": 0},
+])
+@pytest.mark.parametrize("use_cursor", [True, False])
+def test_newer_ineligible_protective_frame_breaks_durable_and_legacy_streak(metadata, use_cursor):
+    now, ticker, cursor = _protective_cursor_fixture()
+    state = {
+        "decisions": [{"ticker": ticker, "generatedAt": (now - timedelta(seconds=2)).isoformat(),
+                       "account": {"heldSide": "YES"}, "blockingReasons": ["protective_exit_confirmation"],
+                       "protectiveConfirmation": metadata}],
+    }
+    if use_cursor:
+        state["strategy"] = {"protectiveExitConfirmations": {ticker: cursor}}
+    result = _protective_exit_confirmation(state, ticker, "YES", {"protectiveLossExit": True}, {}, generated_at=now)
+    assert result["streak"] == 1
+    assert result["confirmed"] is False
+
+
+def test_protective_confirmation_requires_unique_frames_not_replayed_timestamps():
+    now, ticker, _cursor = _protective_cursor_fixture()
+    repeated = {"ticker": ticker, "generatedAt": now.isoformat(), "account": {"heldSide": "YES"},
+                "blockingReasons": ["protective_exit_confirmation"]}
+    result = _protective_exit_confirmation({"decisions": [repeated, repeated]}, ticker, "YES",
+                                           {"protectiveLossExit": True}, {}, generated_at=now)
+    assert result["streak"] == 1
+    emergency = _protective_exit_confirmation({"decisions": [repeated, repeated]}, ticker, "YES",
+                                              {"emergencyLossExit": True}, {}, generated_at=now)
+    assert emergency["confirmed"] is True
+    assert emergency["emergencyBypass"] is True
+
+
+@pytest.mark.parametrize("gate", ["reference_ready", "data_freshness", "history_sample"])
+def test_model_data_gate_failure_cannot_advance_ordinary_protective_confirmation(gate):
+    now, ticker, cursor = _protective_cursor_fixture()
+    decision = {"gates": [{"key": gate, "status": "block"}], "dataQuality": {"warnings": []}}
+    eligible = _protective_confirmation_data_quality(decision)
+    assert eligible is False
+    result = _protective_exit_confirmation(
+        {"strategy": {"protectiveExitConfirmations": {ticker: cursor}}}, ticker, "YES",
+        {"protectiveLossExit": True}, {}, generated_at=now, data_quality_ok=eligible,
+    )
+    assert result["streak"] == 0
+    assert result["dataQualityEligible"] is False
+    assert result["confirmed"] is False
+
+
+def test_exit_confirmation_quality_ignores_entry_window_but_requires_verified_clock():
+    decision = {"gates": [{"key": "entry_window", "status": "block"}]}
+    assert _protective_confirmation_data_quality(decision) is True
+    decision["model"] = {"historyQuality": {"clockVerified": False}}
+    assert _protective_confirmation_data_quality(decision) is False
+    immediate = _protective_exit_confirmation({}, "KXBTC15M-E", "YES", {"emergencyLossExit": True}, {}, data_quality_ok=False)
+    assert immediate["confirmed"] is True
+    assert immediate["emergencyBypass"] is True
 
 
 def test_protective_exit_streak_rejects_persisted_stale_marker():

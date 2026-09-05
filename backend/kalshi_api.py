@@ -48,9 +48,9 @@ try:
 except ImportError:  # pragma: no cover - package-style test imports
     from .kalshi_robot_state import KalshiRobotState
 try:
-    from kalshi_paper import KalshiPaperAccountStore, executable_bid_levels, taker_fill_amounts
+    from kalshi_paper import KalshiPaperAccountStore, aggregate_taker_sale, executable_bid_levels
 except ImportError:  # pragma: no cover - package-style test imports
-    from .kalshi_paper import KalshiPaperAccountStore, executable_bid_levels, taker_fill_amounts
+    from .kalshi_paper import KalshiPaperAccountStore, aggregate_taker_sale, executable_bid_levels
 try:
     from kalshi_reference_stream import KalshiReferenceStream
 except ImportError:  # pragma: no cover - package-style test imports
@@ -98,6 +98,7 @@ KALSHI_LIVE_MARKET_STATE_CONFLICTS = frozenset({
     "kalshi_market_not_found",
     "kalshi_market_inactive",
     "kalshi_market_already_closed",
+    "kalshi_live_history_clock_unverified",
 })
 KALSHI_LIVE_ROUTING_STATE_CONFLICTS = frozenset({
     "kalshi_live_cash_changed",
@@ -108,6 +109,7 @@ KALSHI_LIVE_ROUTING_STATE_CONFLICTS = frozenset({
     "kalshi_live_position_ownership_conflict",
     "kalshi_live_event_position_conflict",
     "kalshi_live_close_inventory_changed",
+    "kalshi_live_voluntary_exit_economics_changed",
     "kalshi_reversal_cooldown_active",
     "kalshi_reentry_confirmation_required",
     "kalshi_entry_confirmation_required",
@@ -891,6 +893,24 @@ def _parse_utc(value: Any) -> Optional[datetime]:
     return parsed.astimezone(timezone.utc)
 
 
+def _coinbase_btc_candle_params(now: datetime) -> Dict[str, Any]:
+    """Request a deterministic, UTC-aligned window within Coinbase's 300-bar cap.
+
+    Include the current partial minute for shock checks; the engine separately
+    excludes it from completed-bar history. Explicit bounds avoid relying on
+    a lagging upstream default window, without random cache-busting or a new
+    per-minute local cache key. Freshness still comes from candle timestamps.
+    """
+    utc_now = now.replace(tzinfo=timezone.utc) if now.tzinfo is None else now.astimezone(timezone.utc)
+    end = utc_now.replace(second=0, microsecond=0) + timedelta(minutes=1)
+    start = end - timedelta(minutes=300)
+    return {
+        "granularity": 60,
+        "start": start.isoformat().replace("+00:00", "Z"),
+        "end": end.isoformat().replace("+00:00", "Z"),
+    }
+
+
 def _hourly_reference_policy(
     reference: Mapping[str, Any],
     market: Mapping[str, Any],
@@ -1013,7 +1033,14 @@ def _fee_reconciliation(
             "filled_count",
         )
     )
-    price = _finite_number(edge.get("price"), None)
+    exit_analysis = dict(decision.get("exitAnalysis") or {})
+    route_economics = dict(exit_analysis.get("routeEconomics") or {})
+    price = _finite_number(
+        route_economics.get("minimumExecutionPrice")
+        if action.startswith("SELL_") and route_economics.get("allowed") is True
+        else edge.get("price"),
+        None,
+    )
     count_for_estimate = filled if filled > 0 else requested
     fee_policy = dict(decision.get("feePolicy") or {})
     taker_fee_rate = _finite_number(
@@ -1026,6 +1053,18 @@ def _fee_reconciliation(
         else {}
     )
     formula_fee = _finite_number(order_cost.get("allInFee"), None)
+    sale = None
+    if action.startswith("SELL_") and price is not None and 0.0 < price < 1.0 and count_for_estimate > 0:
+        sale = aggregate_taker_sale(
+            [(price, count_for_estimate)], count_for_estimate, price,
+            fee_multiplier=taker_fee_rate / 0.07,
+        )
+        formula_fee = sale["fee_cost"]
+        order_cost = {
+            "tradeFee": sale["trade_fee"],
+            "roundingFee": sale["fee_cost"] - sale["trade_fee"],
+            "cashCredit": sale["credit_cents"] / 100.0,
+        }
     model_fee = (
         max(
             0.0,
@@ -1034,15 +1073,16 @@ def _fee_reconciliation(
                 0.0,
             ),
         )
-        if requested > 0
+        if not action.startswith("SELL_") and requested > 0
         and (filled <= 0 or abs(filled - requested) <= 1e-9)
         else None
     )
-    exit_analysis = dict(decision.get("exitAnalysis") or {})
     exit_fee = _finite_number(exit_analysis.get("estimatedExitFee"), None)
     exit_fillable = _finite_number(exit_analysis.get("fillableCount"), 0.0)
     prorated_exit_fee = (
-        exit_fee * count_for_estimate / exit_fillable
+        formula_fee
+        if sale is not None
+        else exit_fee * count_for_estimate / exit_fillable
         if action.startswith("SELL_")
         and exit_fee is not None
         and exit_fillable > 0
@@ -1074,6 +1114,7 @@ def _fee_reconciliation(
         "tradeFeeDollars": order_cost.get("tradeFee"),
         "roundingFeeDollars": order_cost.get("roundingFee"),
         "expectedCashDebitDollars": order_cost.get("cashDebit"),
+        "expectedCashCreditDollars": order_cost.get("cashCredit"),
         "modelFeeDollars": model_fee,
         "estimatedExitFeeDollars": prorated_exit_fee,
         "expectedFeeDollars": expected,
@@ -1333,7 +1374,7 @@ def _market_observation(
                     "momentum15m", "volatilityRatio", "jumpSigma",
                     "marketYesProbability", "uncertainty", "sampleSize",
                     "settlementEffectiveHorizonMinutes", "referenceModel",
-                    "referenceVenueCount", "referenceDispersionBps",
+                    "referenceVenueCount", "referenceDispersionBps", "historyQuality",
                     "basisReserveBpsApplied", "isOfficialBrti",
                     "referenceRawPrice", "settlementWindowAverage",
                     "settlementWindowSamples", "settlementWindowProgress",
@@ -1378,7 +1419,7 @@ def _market_observation(
                     "breakEvenExitValuePerContract", "estimatedExitFee",
                     "expectedHoldValuePerContract", "expectedHoldPnlPerContract",
                     "holdVsExitExpectedDeltaPerContract", "counterfactualPolicy",
-                    "protectiveConfirmation", "lossExitAuthorizedAfterConfirmation",
+                    "protectiveConfirmation", "lossExitAuthorizedAfterConfirmation", "routeEconomics", "routeQuote",
                 )
             },
             "candidateLadder": dict(decision.get("candidateDiagnostics") or {}),
@@ -1759,44 +1800,27 @@ def _estimate_reduce_only_sale(
 ) -> Dict[str, Any]:
     """Estimate a full-depth reduce-only fill, including the official taker fee."""
     requested_count = _contract_quantity(requested)
-    remaining = requested_count
-    gross = 0.0
-    fee = 0.0
-    fill_count = 0.0
-    worst_price = None
-    for price, depth in executable_bid_levels(side, orderbook):
-        if remaining <= 1e-9:
-            break
-        count = _contract_quantity(min(remaining, _finite_number(depth, 0.0)))
-        if count <= 0:
-            continue
-        amounts = taker_fill_amounts(
-            price,
-            count,
-            fee_multiplier=max(
-                0.0,
-                _finite_number(taker_fee_rate, 0.07),
-            ) / 0.07,
-        )
-        gross += float(amounts["positionCost"])
-        fee += float(amounts.get("fee", amounts["tradeFee"]))
-        fill_count += count
-        remaining -= count
-        worst_price = price
-    average = gross / fill_count if fill_count else None
-    net_proceeds = math.floor(max(0.0, gross - fee) * 100.0 + 1e-9) / 100.0
+    sale = aggregate_taker_sale(
+        executable_bid_levels(side, orderbook),
+        requested_count,
+        0.0,
+        fee_multiplier=max(0.0, _finite_number(taker_fee_rate, 0.07)) / 0.07,
+    )
+    fill_count = sale["fill_count"]
+    fills = sale["fills"]
     return {
         "requestedCount": requested_count,
         "fillableCount": _contract_quantity(fill_count),
-        "averageBid": average,
-        "worstBid": worst_price,
-        "grossProceeds": gross,
-        "estimatedExitFee": fee,
+        "averageBid": sale["average_price"] if fill_count else None,
+        "worstBid": fills[-1]["price_dollars"] if fills else None,
+        "grossProceeds": sale["gross_proceeds"],
+        "estimatedExitFee": sale["fee_cost"],
+        "estimatedExitTradeFee": sale["trade_fee"],
         "takerFeeRate": max(
             0.0,
             _finite_number(taker_fee_rate, 0.07),
         ),
-        "netProceeds": net_proceeds,
+        "netProceeds": sale["credit_cents"] / 100.0,
         "fullDepthAvailable": fill_count + 1e-9 >= requested_count,
     }
 
@@ -1905,6 +1929,136 @@ def _exit_economic_state(
     }
 
 
+def _voluntary_exit_route_economics(
+    decision: Mapping[str, Any],
+    payload: Mapping[str, Any],
+    strategy_config: Mapping[str, Any],
+    *,
+    allow_tightening: bool = True,
+) -> Dict[str, Any]:
+    """Check both the observed sale slice and a single-fill limit scenario.
+
+    A full-position VWAP profit does not establish profitability for a small
+    scale-out after cent rounding or crossing tolerance. This guard is only
+    for voluntary profit-taking; risk-reducing stops must remain executable.
+    Per-fill trade-fee rounding means a single fill at the limit is not always
+    a lower bound than a slightly better, fragmented fill. Both scenarios
+    must clear the existing profit hurdle. Neither guarantees IOC execution
+    or the eventual number of fills when the live orderbook changes.
+    """
+    exit_analysis = dict(decision.get("exitAnalysis") or {})
+    applicable = bool(
+        str(decision.get("action") or "").startswith("SELL_")
+        and exit_analysis.get("trigger") == "fee_adjusted_take_profit"
+    )
+    if not applicable:
+        return {"applicable": False, "allowed": True}
+    config = normalize_strategy_config(strategy_config)
+    count = _contract_quantity(payload.get("count"))
+    limit = _finite_number(payload.get("user_side_limit_price"), None)
+    reference = _finite_number(payload.get("user_side_reference_price"), limit)
+    break_even = _finite_number(exit_analysis.get("breakEvenExitValuePerContract"), None)
+    hold_value = _finite_number(exit_analysis.get("heldProbability"), None)
+    required_value = (
+        max(break_even + config["minimumExitProfit"], hold_value + config["exitValueBuffer"])
+        if break_even is not None and hold_value is not None
+        else None
+    )
+    result = {
+        "applicable": True,
+        "allowed": False,
+        "requestedContracts": count,
+        "proposedLimitPrice": limit,
+        "minimumExecutionPrice": limit,
+        "breakEvenExitValuePerContract": break_even,
+        "requiredNetValuePerContract": required_value,
+        "minimumExitProfit": config["minimumExitProfit"],
+        "requiredExitValueEdge": config["exitValueBuffer"],
+        "limitTightened": False,
+        "assumption": "observed_full_slice_and_single_fill_limit_scenarios; live fragmentation or partial fills may differ",
+    }
+    if count <= 0 or limit is None or not 0.0 < limit < 1.0 or required_value is None:
+        return result
+    quote = dict(exit_analysis.get("routeQuote") or {})
+    quote_net = _finite_number(quote.get("netProceeds"), None)
+    quote_gross = _finite_number(quote.get("grossProceeds"), None)
+    quote_fee = _finite_number(quote.get("estimatedExitFee"), None)
+    quote_trade_fee = _finite_number(quote.get("estimatedExitTradeFee"), None)
+    quote_price = _finite_number(quote.get("worstBid"), None)
+    quote_rate = _finite_number(quote.get("takerFeeRate"), None)
+    quote_matches = bool(
+        abs(_finite_number(quote.get("requestedCount"), -1) - count) <= 1e-9
+        and abs(_finite_number(quote.get("fillableCount"), -1) - count) <= 1e-9
+        and quote_net is not None and quote_net >= 0
+        and quote_gross is not None and quote_gross >= quote_net
+        and quote_fee is not None and quote_fee >= 0
+        and quote_trade_fee is not None and quote_trade_fee >= 0
+        and abs(quote_gross - quote_fee - quote_net) <= 1e-8
+        and quote_price is not None and 0 < quote_price < 1
+        and limit <= quote_price + 1e-9
+        and reference is not None and abs(reference - quote_price) <= 1e-8
+        and quote_rate is not None and abs(quote_rate - config["takerFeeRate"]) <= 1e-9
+    )
+    quote_value = quote_net / count if quote_matches else None
+    quote_clears = bool(quote_value is not None and quote_value + 1e-9 >= required_value)
+    result.update({
+        "routeQuoteMatchesPayload": quote_matches,
+        "observedSliceNetProceeds": quote_net,
+        "observedSliceNetValuePerContract": quote_value,
+        "observedSliceProfitable": quote_clears,
+    })
+    # Final preflight checks this exact quantity again; never scale/prorate an
+    # old ladder fee after a count or fee-policy change.
+    if not quote_matches:
+        return result
+    prices = [limit]
+    # Removing the crossing allowance preserves the observed executable bid;
+    # never invent a higher bid or increase the configured scale-out quantity.
+    if allow_tightening and reference is not None and limit < reference < 1.0:
+        prices.append(reference)
+    for price in prices:
+        sale = aggregate_taker_sale(
+            [(price, count)], count, price,
+            fee_multiplier=config["takerFeeRate"] / 0.07,
+        )
+        limit_net = sale["credit_cents"] / 100.0
+        net = min(limit_net, quote_net)
+        net_per_contract = net / count
+        result.update({
+            "minimumExecutionPrice": price,
+            "limitTightened": price > limit + 1e-9,
+            "estimatedExitFee": max(sale["fee_cost"], quote_fee),
+            "estimatedNetProceeds": net,
+            "singleFillLimitNetProceeds": limit_net,
+            "netExitValuePerContract": net_per_contract,
+            "netExitPnlPerContract": net_per_contract - break_even,
+            "netExitPnl": net - count * break_even,
+            "exitValueEdge": net_per_contract - hold_value,
+            "allowed": quote_clears and net_per_contract + 1e-9 >= required_value,
+        })
+        if result["allowed"]:
+            break
+    return result
+
+
+def _protective_confirmation_data_quality(decision: Mapping[str, Any]) -> bool:
+    """Ordinary stop confirmations require valid model evidence, not entry timing."""
+    history_quality = (decision.get("model") or {}).get("historyQuality") or {}
+    return bool(
+        history_quality.get("clockVerified") is not False
+        and not (
+            set((decision.get("dataQuality") or {}).get("warnings") or [])
+            & KALSHI_EXECUTION_BLOCKING_WARNINGS
+        )
+        and not any(
+            gate.get("key") in {"reference_ready", "data_freshness", "history_sample"}
+            and (gate.get("status") == "block" or gate.get("blocking") is True)
+            for gate in decision.get("gates") or []
+            if isinstance(gate, Mapping)
+        )
+    )
+
+
 def _protective_exit_confirmation(
     robot_state: Mapping[str, Any],
     ticker: str,
@@ -1917,11 +2071,9 @@ def _protective_exit_confirmation(
 ) -> Dict[str, Any]:
     """Confirm an ordinary loss exit across durable scheduler decisions.
 
-    ``KalshiRobotState.record`` persists every lease-owning cycle's blocking
-    reasons.  Reusing those rows makes the confirmation survive a worker
-    restart without introducing a second, process-local stop-loss state.  A
-    true emergency remains immediate and therefore cannot be delayed by this
-    hysteresis guard.
+    The compact per-ticker state cursor survives worker restarts without
+    persisting full decision history. A true emergency remains immediate and
+    cannot be delayed by this hysteresis guard.
     """
     required = max(
         2,
@@ -1980,9 +2132,70 @@ def _protective_exit_confirmation(
     streak = 1
     previous_time = _parse_utc(generated_at) or datetime.now(timezone.utc)
     normalized_side = str(held_side or "").upper()
-    for row in list(robot_state.get("decisions") or []):
-        if str(row.get("ticker") or "") != str(ticker or ""):
-            continue
+    ticker_history = [
+        row for row in list(robot_state.get("decisions") or [])
+        if isinstance(row, Mapping) and str(row.get("ticker") or "") == str(ticker or "")
+    ]
+    cursors = (robot_state.get("strategy") or {}).get("protectiveExitConfirmations")
+    cursor = cursors.get(ticker) if isinstance(cursors, Mapping) else None
+
+    def eligible_row(row: Mapping[str, Any]) -> bool:
+        row_side = str(((row.get("account") or {}).get("heldSide") or "")).upper()
+        metadata = next(
+            (value for value in (
+                row.get("protectiveConfirmation"),
+                (row.get("exitAnalysis") or {}).get("protectiveConfirmation"),
+                ((row.get("features") or {}).get("exitAnalysis") or {}).get("protectiveConfirmation"),
+            ) if value is not None),
+            None,
+        )
+        reasons = set(str(value) for value in (row.get("blockingReasons") or []))
+        return bool(
+            (not row_side or row_side == normalized_side)
+            and (
+                metadata is None
+                or (
+                    isinstance(metadata, Mapping)
+                    and metadata.get("dataQualityEligible") is True
+                    and metadata.get("required") is not False
+                    and metadata.get("emergencyBypass") is not True
+                    and _finite_number(metadata.get("streak"), 1) > 0
+                )
+            )
+            and (
+                {"protective_exit_confirmation", "protective_exit_confirmed"} & reasons
+                or str(row.get("exitTrigger") or "") == "protective_stop_loss"
+            )
+        )
+
+    if isinstance(cursor, Mapping):
+        cursor_time = _parse_utc(cursor.get("generatedAt"))
+        elapsed = (previous_time - cursor_time).total_seconds() if cursor_time is not None else None
+        newer_invalid = any(
+            row_time is not None and cursor_time is not None and row_time >= cursor_time
+            and not eligible_row(row)
+            for row in ticker_history
+            for row_time in [_parse_utc(row.get("generatedAt"))]
+        )
+        if (
+            str(cursor.get("ticker") or "") == str(ticker or "")
+            and str(cursor.get("side") or "").upper() == normalized_side
+            and cursor.get("dataQualityEligible") is True
+            and cursor.get("required") is not False
+            and cursor.get("emergencyBypass") is not True
+            and _finite_number(cursor.get("streak"), 0) > 0
+            and elapsed is not None and 1e-6 < elapsed <= max_gap
+            and not newer_invalid
+        ):
+            streak = min(required, max(1, int(_finite_number(cursor.get("streak"), 1))) + 1)
+            return {
+                "required": True, "requiredSnapshots": required, "streak": streak,
+                "confirmed": streak >= required, "emergencyBypass": False,
+                "dataQualityEligible": True, "maxGapSeconds": max_gap,
+                "durableProgressUsed": True,
+            }
+    # An explicit invalid cursor must reset, never resurrect older history.
+    for row in ([] if isinstance(cursor, Mapping) else ticker_history):
         row_side = str(((row.get("account") or {}).get("heldSide") or "")).upper()
         if row_side and normalized_side and row_side != normalized_side:
             break
@@ -1990,32 +2203,13 @@ def _protective_exit_confirmation(
         if row_time is None:
             break
         gap = (previous_time - row_time).total_seconds()
-        if gap < -1e-6 or gap > max_gap:
+        if gap <= 1e-6 or gap > max_gap:
             break
-        persisted_confirmation = (
-            row.get("protectiveConfirmation")
-            or (row.get("exitAnalysis") or {}).get(
-                "protectiveConfirmation"
-            )
-            or ((row.get("features") or {}).get("exitAnalysis") or {}).get(
-                "protectiveConfirmation"
-            )
-        )
         # Explicitly ineligible persisted rows are never allowed to advance a
         # later fresh streak, even if an old worker accidentally wrote the
         # legacy marker. Missing metadata remains compatible with eligible
         # rows recorded before this field was introduced.
-        if (
-            isinstance(persisted_confirmation, Mapping)
-            and persisted_confirmation.get("dataQualityEligible") is not True
-        ):
-            break
-        reasons = set(str(value) for value in (row.get("blockingReasons") or []))
-        if (
-            "protective_exit_confirmation" not in reasons
-            and "protective_exit_confirmed" not in reasons
-            and str(row.get("exitTrigger") or "") != "protective_stop_loss"
-        ):
+        if not eligible_row(row):
             break
         streak += 1
         previous_time = row_time
@@ -2920,6 +3114,12 @@ def _paper_order_payload(
         crossing = max(0.0, execution_price - selected_price)
     else:
         execution_price = min(0.99, selected_price + crossing) if is_buy else max(0.01, selected_price - crossing)
+    if is_sell and (decision.get("exitAnalysis") or {}).get("trigger") == "fee_adjusted_take_profit":
+        route_economics = (decision.get("exitAnalysis") or {}).get("routeEconomics") or {}
+        protected_price = _finite_number(route_economics.get("minimumExecutionPrice"), None)
+        if route_economics.get("allowed") is True and protected_price is not None:
+            execution_price = max(execution_price, protected_price)
+            crossing = max(0.0, selected_price - execution_price)
     yes_book_price = execution_price if side == "YES" else 1.0 - execution_price
     if not str(ticker or "").strip() or not 0.0 < yes_book_price < 1.0:
         return None
@@ -4547,7 +4747,8 @@ class _PublicDataClient:
         reference_override: Optional[Mapping[str, Any]] = None,
     ) -> Dict[str, Any]:
         started_at = time.perf_counter()
-        now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+        now = now or datetime.now(timezone.utc)
+        now = now.replace(tzinfo=timezone.utc) if now.tzinfo is None else now.astimezone(timezone.utc)
         warnings = []
         market, selection = self._market_candidates(now, base_url)
         if not market:
@@ -4674,7 +4875,7 @@ class _PublicDataClient:
             candles = self._cached_json(
                 "coinbase-btc-candles-1m",
                 f"{COINBASE_EXCHANGE_BASE}/products/BTC-USD/candles",
-                params={"granularity": 60},
+                params=_coinbase_btc_candle_params(now),
                 # 15s keeps the momentum logit term at most one refresh behind
                 # inside the 100-320s decision window while staying far under
                 # Coinbase's public rate limits at a 5-second robot cadence.
@@ -6427,6 +6628,13 @@ class _PaperRobotController:
         )
         if existing is not None:
             return dict(existing)
+        history_quality = (decision.get("model") or {}).get("historyQuality") or {}
+        if is_buy and history_quality.get("clockVerified") is False:
+            raise KalshiApiError(
+                "Real entries require epoch-timestamped candle history with a verified clock.",
+                status=409,
+                code="kalshi_live_history_clock_unverified",
+            )
         open_orders = [
             row for row in all_orders
             if str(row.get("status") or "").lower() not in terminal_states
@@ -6601,6 +6809,18 @@ class _PaperRobotController:
                     code="kalshi_live_close_inventory_changed",
                 )
             # Reduce-only exits are never blocked by entry cash or exposure.
+            final_exit = _voluntary_exit_route_economics(
+                decision,
+                {**dict(payload), "count": requested_count, "user_side_limit_price": user_price},
+                decision.get("config") or {},
+                allow_tightening=False,
+            )
+            if final_exit["applicable"] and not final_exit["allowed"]:
+                raise KalshiApiError(
+                    "The actual voluntary close size and limit no longer preserve fee-adjusted exit economics.",
+                    status=409,
+                    code="kalshi_live_voluntary_exit_economics_changed",
+                )
             return None
 
         if exact_opposite:
@@ -7627,10 +7847,7 @@ class _PaperRobotController:
             exit_economics,
             strategy_config,
             generated_at=decision.get("generatedAt"),
-            data_quality_ok=not bool(
-                set((decision.get("dataQuality") or {}).get("warnings") or [])
-                & KALSHI_EXECUTION_BLOCKING_WARNINGS
-            ),
+            data_quality_ok=_protective_confirmation_data_quality(decision),
         )
         loss_exit_authorized = bool(
             exit_economics.get("emergencyLossExit")
@@ -8248,6 +8465,51 @@ class _PaperRobotController:
                     "reference, and history inputs are fresh."
                 ),
             }]
+        if can_route and str(decision.get("action") or "").startswith("SELL_"):
+            if (decision.get("exitAnalysis") or {}).get("trigger") == "fee_adjusted_take_profit":
+                # A scale-out consumes only its own slice of the bid ladder.
+                # Retaining the full holding's deepest bid would needlessly
+                # reject profitable shallow reductions or permit excess slip.
+                planned_sale = _estimate_reduce_only_sale(
+                    str(decision.get("side") or ""),
+                    route_count_override if route_count_override is not None else fillable_exit_count,
+                    snapshot.get("orderbook") or {},
+                    taker_fee_rate=_finite_number(strategy_config.get("takerFeeRate"), 0.07),
+                )
+                if planned_sale["fullDepthAvailable"] and planned_sale["worstBid"] is not None:
+                    decision["edge"]["price"] = planned_sale["worstBid"]
+                decision["exitAnalysis"]["routeQuote"] = {
+                    key: planned_sale.get(key) for key in (
+                        "requestedCount", "fillableCount", "averageBid", "worstBid", "grossProceeds",
+                        "estimatedExitFee", "estimatedExitTradeFee", "netProceeds", "takerFeeRate",
+                    )
+                }
+            proposed_exit_payload = _paper_order_payload(
+                decision, ticker, count_override=route_count_override,
+                price_tolerance=_finite_number(strategy_config.get("executionPriceTolerance"), 0.01),
+            )
+            route_economics = _voluntary_exit_route_economics(
+                decision, proposed_exit_payload or {}, strategy_config,
+            )
+            if route_economics["applicable"]:
+                decision["exitAnalysis"]["routeEconomics"] = route_economics
+                if not route_economics["allowed"]:
+                    can_route = False
+                    decision["action"] = "WAIT"
+                    decision["executionIntent"] = f"HOLD_{held_side}_EXIT_ECONOMICS"
+                    decision["blockingReasons"] = list(dict.fromkeys(
+                        list(decision.get("blockingReasons") or []) + ["voluntary_exit_routing_economics"]
+                    ))
+                    decision["gates"] = list(decision.get("gates") or []) + [{
+                        "category": "execution",
+                        "name": "Fee-adjusted voluntary exit",
+                        "label": "Fee-adjusted voluntary exit",
+                        "labelZh": "扣费后主动止盈",
+                        "status": "block",
+                        "value": route_economics.get("netExitValuePerContract"),
+                        "threshold": route_economics.get("requiredNetValuePerContract"),
+                        "detail": "The actual scale-out size and IOC limit do not preserve the configured net profit and hold-value advantage.",
+                    }]
         if execution_mode == "real" and _apply_real_shard_funding_gate(
             decision,
             account_context,
