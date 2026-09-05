@@ -49,6 +49,18 @@ provide shock evidence; it is not a completed volatility sample. BRTI remains
 the settlement reference, not a substitute for Coinbase's candle clock.
 [Coinbase candle specification](https://docs.cdp.coinbase.com/api-reference/exchange-api/rest-api/products/get-product-candles).
 
+The public source request now specifies a UTC minute-aligned 300-minute
+start/end window, ending at the next minute boundary, while retaining the
+existing 15-second local cache. A live read-only check found the unbounded
+default endpoint returning completed data more than 120 seconds old, whereas
+the explicit window returned 299 completed bars and one current partial bar,
+with the latest completed close about 12 seconds old. This is a source-window
+correction, not a higher polling rate or a relaxation of freshness validation.
+The exact returned sample count can differ from the old unbounded response;
+sampling uncertainty and the full-input return outlier cap may therefore
+change. This is not included in the identical-input equivalence claim, and no
+old observations are fabricated to force the previous forecast.
+
 The compact `historyQuality` diagnostic records clock verification, duplicate,
 gap and excluded-row counts, completed sample size and age. No raw candle or
 order-book history is added to routine durable heartbeat writes. Relative-index

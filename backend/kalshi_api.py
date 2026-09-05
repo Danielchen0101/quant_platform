@@ -893,6 +893,24 @@ def _parse_utc(value: Any) -> Optional[datetime]:
     return parsed.astimezone(timezone.utc)
 
 
+def _coinbase_btc_candle_params(now: datetime) -> Dict[str, Any]:
+    """Request a deterministic, UTC-aligned window within Coinbase's 300-bar cap.
+
+    Include the current partial minute for shock checks; the engine separately
+    excludes it from completed-bar history. Explicit bounds avoid relying on
+    a lagging upstream default window, without random cache-busting or a new
+    per-minute local cache key. Freshness still comes from candle timestamps.
+    """
+    utc_now = now.replace(tzinfo=timezone.utc) if now.tzinfo is None else now.astimezone(timezone.utc)
+    end = utc_now.replace(second=0, microsecond=0) + timedelta(minutes=1)
+    start = end - timedelta(minutes=300)
+    return {
+        "granularity": 60,
+        "start": start.isoformat().replace("+00:00", "Z"),
+        "end": end.isoformat().replace("+00:00", "Z"),
+    }
+
+
 def _hourly_reference_policy(
     reference: Mapping[str, Any],
     market: Mapping[str, Any],
@@ -4729,7 +4747,8 @@ class _PublicDataClient:
         reference_override: Optional[Mapping[str, Any]] = None,
     ) -> Dict[str, Any]:
         started_at = time.perf_counter()
-        now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+        now = now or datetime.now(timezone.utc)
+        now = now.replace(tzinfo=timezone.utc) if now.tzinfo is None else now.astimezone(timezone.utc)
         warnings = []
         market, selection = self._market_candidates(now, base_url)
         if not market:
@@ -4856,7 +4875,7 @@ class _PublicDataClient:
             candles = self._cached_json(
                 "coinbase-btc-candles-1m",
                 f"{COINBASE_EXCHANGE_BASE}/products/BTC-USD/candles",
-                params={"granularity": 60},
+                params=_coinbase_btc_candle_params(now),
                 # 15s keeps the momentum logit term at most one refresh behind
                 # inside the 100-320s decision window while staying far under
                 # Coinbase's public rate limits at a 5-second robot cadence.

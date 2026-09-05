@@ -61,6 +61,58 @@ from kalshi_api import (
 )
 
 
+@pytest.mark.parametrize("timestamp,start,end", [
+    ("2026-09-05T20:52:17", "2026-09-05T15:53:00Z", "2026-09-05T20:53:00Z"),
+    ("2026-09-05T20:52:17+00:00", "2026-09-05T15:53:00Z", "2026-09-05T20:53:00Z"),
+    ("2026-09-05T20:59:59.999999+00:00", "2026-09-05T16:00:00Z", "2026-09-05T21:00:00Z"),
+    ("2026-09-05T23:59:59+00:00", "2026-09-05T19:00:00Z", "2026-09-06T00:00:00Z"),
+    ("2026-09-05T23:59:59-04:00", "2026-09-05T23:00:00Z", "2026-09-06T04:00:00Z"),
+])
+def test_coinbase_candle_window_is_bounded_utc_and_minute_aligned(timestamp, start, end):
+    params = kalshi_api._coinbase_btc_candle_params(datetime.fromisoformat(timestamp))
+    assert params == {"granularity": 60, "start": start, "end": end}
+    assert (datetime.fromisoformat(end.replace("Z", "+00:00")) - datetime.fromisoformat(start.replace("Z", "+00:00"))).total_seconds() == 300 * 60
+
+
+@pytest.mark.parametrize("use_naive", [False, True])
+def test_snapshot_bounded_candle_window_preserves_shared_cache_ttl_across_minute_rollover(monkeypatch, use_naive):
+    now = datetime(2026, 9, 5, 20, 59, 59, tzinfo=timezone.utc)
+    http_calls, cache_calls = [], []
+
+    def fake_get(url, params=None, **_kwargs):
+        if url.endswith("/candles"):
+            http_calls.append(dict(params or {}))
+            return _Response([[int(now.timestamp()) - 119, 65000, 65001, 65000, 65000, 1]])
+        if url.endswith("/orderbook"):
+            return _Response({"orderbook_fp": {"yes_dollars": [["0.49", "100"]], "no_dollars": [["0.49", "100"]]}})
+        raise AssertionError(url)
+
+    client = _PublicDataClient(http_get=fake_get)
+    monkeypatch.setattr(client, "_market_candidates", lambda *_args: ({"ticker": "KXBTC15M-WINDOW"}, "active"))
+    cached_json = client._cached_json
+
+    def capture_cache(key, url, **kwargs):
+        if url.endswith("/candles"):
+            cache_calls.append((key, kwargs))
+        return cached_json(key, url, **kwargs)
+
+    monkeypatch.setattr(client, "_cached_json", capture_cache)
+    override = {"price": 65000, "isOfficialBrti": True, "timestamp": now.isoformat()}
+    request_now = now.replace(tzinfo=None) if use_naive else now
+    first = client.snapshot(now=request_now, reference_override=override)
+    second = client.snapshot(now=request_now + timedelta(seconds=2), reference_override=override)
+    assert len(cache_calls) == 2
+    assert len(http_calls) == 1  # A new minute does not bypass the existing TTL.
+    assert http_calls[0] == {"granularity": 60, "start": "2026-09-05T16:00:00Z", "end": "2026-09-05T21:00:00Z"}
+    assert cache_calls[1][1]["params"]["end"] == "2026-09-05T21:01:00Z"
+    for key, kwargs in cache_calls:
+        assert key == "coinbase-btc-candles-1m"
+        assert kwargs["ttl"] == 15.0
+        assert kwargs["max_stale"] == 120.0
+    assert first["reference"]["candles"] == second["reference"]["candles"]
+    assert first["reference"]["candles"][0][0] == int(now.timestamp()) - 119
+
+
 def test_dual_market_live_policies_are_separately_calibrated():
     base = {
         "maxPrice": 0.92,
